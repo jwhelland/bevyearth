@@ -63,6 +63,7 @@ impl Coordinates {
     }
 
     pub fn get_point_on_sphere(&self) -> Vec3 {
+        // note: bevy coords where y is up
         let y = self.latitude.sin();
         let r = self.latitude.cos();
         let x = self.longitude.sin() * r;
