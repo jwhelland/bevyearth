@@ -17,6 +17,15 @@ mod earth;
 use cities::spawn_city_population_spheres;
 use earth::generate_faces;
 
+#[derive(Resource)]
+struct UIState {
+    name: String
+}
+impl Default for UIState {
+    fn default() -> Self {
+        Self { name: "".to_string() }
+    }
+}
 /// The `ShowAxes` component is attached to an entity to get the `draw_axes` system to
 /// display axes according to its Transform component.
 #[derive(Component)]
@@ -68,17 +77,17 @@ fn ui_example_system(
     mut contexts: EguiContexts,
     mut camera: Single<&mut Camera, Without<EguiContext>>,
     window: Single<&mut Window, With<PrimaryWindow>>,
+    mut state: ResMut<UIState>
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-
     let mut left = egui::SidePanel::left("left_panel")
         .resizable(true)
         .show(ctx, |ui| {
             ui.label("Left resizeable panel");
-            ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
+            // ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
             ui.horizontal(|ui| {
                 ui.label("Name");
-                ui.text_edit_singleline(&mut state.new_name);
+                ui.text_edit_singleline(&mut state.name);
             });
         })
         .response
@@ -163,6 +172,7 @@ fn ui_example_system(
 
 fn main() {
     App::new()
+        .init_resource::<UIState>()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(PanOrbitCameraPlugin)
