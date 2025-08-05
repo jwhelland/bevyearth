@@ -1,7 +1,7 @@
+use crate::coord::Coordinates;
 use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;
-use crate::coord::Coordinates;
 
 // Define constants for scaling the spheres
 const BASE_RADIUS: f32 = 15.0; // Minimum radius for smallest city
@@ -17,7 +17,6 @@ struct CityMarker {
     name: String,
     population: f32,
 }
-
 
 pub fn spawn_city_population_spheres(
     mut commands: Commands,
