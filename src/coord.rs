@@ -108,3 +108,41 @@ fn map_longitude(lon: f32) -> Result<f32, CoordError> {
         Ok(map((0.0, 180.0), (0.5, 1.0), lon))
     }
 }
+
+/// True if the straight segment from city (on/near sphere surface) to satellite does NOT intersect the Earth sphere.
+/// Uses a robust segment-sphere intersection test around the origin.
+pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
+    // Parametric segment P(t) = C + t*(S - C), t in [0,1]
+    let c = city_ecef_km;
+    let u = sat_ecef_km - city_ecef_km;
+
+    // Solve |C + t u|^2 = R^2  -> (u·u) t^2 + 2 (C·u) t + (C·C - R^2) = 0
+    let a = u.length_squared();
+    if a == 0.0 {
+        // City and satellite at same point -> degenerate, treat as not visible
+        return false;
+    }
+    let b = 2.0 * c.dot(u);
+    let c_term = c.length_squared() - earth_radius_km * earth_radius_km;
+
+    let discr = b * b - 4.0 * a * c_term;
+
+    if discr < 0.0 {
+        // No intersection with infinite line => segment cannot hit sphere
+        return true;
+    }
+
+    let sqrt_d = discr.sqrt();
+    let t1 = (-b - sqrt_d) / (2.0 * a);
+    let t2 = (-b + sqrt_d) / (2.0 * a);
+
+    // If either intersection parameter lies within the segment [0,1], LOS is blocked.
+    let hits_segment = (0.0..=1.0).contains(&t1) || (0.0..=1.0).contains(&t2);
+    !hits_segment
+}
+
+/// Cheap prefilter: city is potentially visible only if city and satellite are on the same hemisphere
+/// relative to the sphere origin. Equivalent to dot(C, S) > R^2 (both outside the tangent plane).
+pub fn hemisphere_prefilter(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
+    city_ecef_km.dot(sat_ecef_km) > earth_radius_km * earth_radius_km
+}

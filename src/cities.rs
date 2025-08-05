@@ -3,28 +3,30 @@ use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;
 
+use crate::earth::EARTH_RADIUS_KM;
+
 // Define constants for scaling the spheres
 const BASE_RADIUS: f32 = 15.0; // Minimum radius for smallest city
 const SCALE_FACTOR: f32 = 0.8; // Multiplier for population to radius conversion
 const MIN_POPULATION: f32 = 5.0; // For normalization purposes
 const MAX_POPULATION: f32 = 40.0; // For normalization purposes
 
+// CPU cache of city locations in ECEF kilometers
+#[derive(Resource, Deref, DerefMut)]
+pub struct CitiesEcef(pub Vec<Vec3>);
+
 // Create a component to store city information.
 // Not used in this example, but could be used for a tooltip or similar.
 #[allow(dead_code)]
 #[derive(Component)]
-struct CityMarker {
-    name: String,
-    population: f32,
+pub struct CityMarker {
+    pub name: String,
+    pub population: f32,
 }
 
-pub fn spawn_city_population_spheres(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Cities data: (name, latitude, longitude, population in millions)
-    let major_cities: Vec<(String, f32, f32, f32)> = vec![
+// Expose major_cities so both mesh spawning and ECEF cache use the same data
+pub fn major_cities_data() -> Vec<(String, f32, f32, f32)> {
+    vec![
         (String::from("Zero"), 0.0, 0.0, 37.4),
         (String::from("Tokyo"), 35.6762, 139.6503, 37.4),
         (String::from("Delhi"), 28.6139, 77.2090, 32.9),
@@ -66,31 +68,43 @@ pub fn spawn_city_population_spheres(
         (String::from("Johannesburg"), -26.2041, 28.0473, 5.9),
         (String::from("Chicago"), 41.8781, -87.6298, 8.9),
         (String::from("Taipei"), 25.0330, 121.5654, 7.4),
-    ];
+    ]
+}
 
+// Startup system: cache ECEF positions and also spawn spheres
+pub fn spawn_city_population_spheres(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let major_cities = major_cities_data();
+
+    // Build ECEF cache (km)
+    let mut cache = Vec::with_capacity(major_cities.len());
+    for (_name, latitude, longitude, _population) in &major_cities {
+        let ecef = Coordinates::from_degrees(*latitude, *longitude)
+            .unwrap()
+            .get_point_on_sphere(); // already returns EARTH_RADIUS_KM scaled Vec3
+        cache.push(ecef);
+    }
+    commands.insert_resource(CitiesEcef(cache));
+
+    // Visual markers
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Ico { subdivisions: 32 });
-    // Spawn a sphere for each city
     for (name, latitude, longitude, population) in major_cities {
-        // Convert latitude and longitude to 3D coordinates on the sphere
         let coords = Coordinates::from_degrees(latitude, longitude)
             .unwrap()
             .get_point_on_sphere();
 
-        // Calculate sphere size based on population
-        // Using a logarithmic scale to prevent extremely large cities from dominating
+        // Scale by population
         let normalized_population =
             (population - MIN_POPULATION) / (MAX_POPULATION - MIN_POPULATION);
         let size = BASE_RADIUS + (normalized_population * SCALE_FACTOR * 10.0);
 
-        // Calculate color based on population (gradient from yellow to red)
+        // Color gradient
         let t = normalized_population.clamp(0.0, 1.0);
-        let color = Color::srgb(
-            1.0,             // Red stays at 1.0
-            1.0 - (t * 0.7), // Green decreases with population
-            0.5 - (t * 0.4), // Blue decreases with population
-        );
+        let color = Color::srgb(1.0, 1.0 - (t * 0.7), 0.5 - (t * 0.4));
 
-        // Spawn the city sphere
         commands.spawn((
             Mesh3d(meshes.add(sphere_mesh.clone())),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -98,19 +112,7 @@ pub fn spawn_city_population_spheres(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(coords.x, coords.y, coords.z))
-                .with_scale(Vec3::splat(size)),
-            // PbrBundle {
-            //     mesh: sphere_mesh.clone(),
-            //     material: materials.add(StandardMaterial {
-            //         base_color: color,
-            //         unlit: true,
-            //         ..default()
-            //     }),
-            //     transform: Transform::from_translation(Vec3::new(coords.x, coords.y, coords.z))
-            //         .with_scale(Vec3::splat(size)),
-            //     ..default()
-            // },
+            Transform::from_translation(coords).with_scale(Vec3::splat(size)),
             CityMarker { name, population },
         ));
     }
