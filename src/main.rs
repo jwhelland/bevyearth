@@ -14,22 +14,158 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 mod cities;
 mod coord;
 mod earth;
-use cities::spawn_city_population_spheres;
+use crate::earth::EARTH_RADIUS_KM;
+use cities::{CitiesEcef, spawn_city_population_spheres};
+use coord::{hemisphere_prefilter, los_visible_ecef};
 use earth::generate_faces;
+
+#[derive(Component)]
+struct Satellite;
+
+// Arrow rendering config
+#[derive(Resource)]
+struct ArrowConfig {
+    enabled: bool,
+    color: Color,
+    max_visible: usize,
+    lift_m: f32,       // lift city endpoint off the surface (meters)
+    tip_offset_m: f32, // offset before satellite tip (meters)
+    head_len_pct: f32,
+    head_min_m: f32,
+    head_max_m: f32,
+    head_radius_pct: f32,
+    shaft_len_pct: f32,   // fraction of city->sat distance to draw as shaft
+    shaft_min_m: f32,     // minimum shaft length in meters
+    shaft_max_m: f32,     // maximum shaft length in meters
+}
+impl Default for ArrowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: Color::srgb(0.1, 0.9, 0.3),
+            max_visible: 200,
+            lift_m: 1000.0,
+            tip_offset_m: 2000.0,
+            head_len_pct: 0.02,
+            head_min_m: 10_000.0,
+            head_max_m: 100_000.0,
+            head_radius_pct: 0.4,
+            shaft_len_pct: 0.12,  // draw only the first 12% toward satellite
+            shaft_min_m: 5_000.0,
+            shaft_max_m: 400_000.0,
+        }
+    }
+}
+
+// Satellite ECEF position resource (in kilometers to match EARTH_RADIUS_KM)
+#[derive(Resource, Deref, DerefMut, Default)]
+struct SatEcef(pub Vec3);
 
 #[derive(Resource)]
 struct UIState {
-    name: String
+    name: String,
 }
 impl Default for UIState {
     fn default() -> Self {
-        Self { name: "".to_string() }
+        Self {
+            name: "".to_string(),
+        }
     }
 }
-/// The `ShowAxes` component is attached to an entity to get the `draw_axes` system to
-/// display axes according to its Transform component.
+// The `ShowAxes` component is attached to an entity to get the `draw_axes` system to
+// display axes according to its Transform component.
 #[derive(Component)]
 struct ShowAxes;
+
+// System: update satellite ECEF resource from Satellite entity transform
+fn update_satellite_ecef(
+    sat_query: Query<&Transform, With<Satellite>>,
+    mut sat_res: ResMut<SatEcef>,
+) {
+    if let Ok(t) = sat_query.single() {
+        // World coordinates are already in km scale in this app (EARTH_RADIUS_KM sphere)
+        sat_res.0 = t.translation;
+    }
+}
+
+// System: compute visibility and draw arrows using Gizmos for now (prototype of geometry path).
+// We will draw lines from city -> satellite and a small cone approximation at the satellite pointing toward the city.
+fn draw_city_to_satellite_arrows(
+    mut gizmos: Gizmos,
+    sat: Res<SatEcef>,
+    cities: Option<Res<CitiesEcef>>,
+    config: Res<ArrowConfig>,
+) {
+    if !config.enabled {
+        return;
+    }
+    let Some(cities) = cities else {
+        return;
+    };
+
+    // constants conversion meters->kilometers
+    let lift_km = config.lift_m / 1000.0;
+    let tip_offset_km = config.tip_offset_m / 1000.0;
+    let head_min_km = config.head_min_m / 1000.0;
+    let head_max_km = config.head_max_m / 1000.0;
+
+    let sat_pos = **sat;
+    let mut drawn = 0usize;
+    for &city in cities.iter() {
+        if !hemisphere_prefilter(city, sat_pos, EARTH_RADIUS_KM) {
+            continue;
+        }
+        if !los_visible_ecef(city, sat_pos, EARTH_RADIUS_KM) {
+            continue;
+        }
+        // Direction and lifted city endpoint to avoid z-fighting with globe
+        let dir = (sat_pos - city).normalize();
+        let city_lifted = city.normalize() * (EARTH_RADIUS_KM + lift_km);
+
+        // Compute total city->sat distance from the lifted point
+        let total_len = (sat_pos - city_lifted).length();
+
+        // Compute a short shaft length near the city only
+        let mut shaft_len = config.shaft_len_pct * total_len;
+        // clamp by mins/max (convert meters->km)
+        let shaft_min_km = config.shaft_min_m / 1000.0;
+        let shaft_max_km = config.shaft_max_m / 1000.0;
+        shaft_len = shaft_len.clamp(shaft_min_km, shaft_max_km).min(total_len * 0.9);
+
+        // Shaft end point along direction toward satellite
+        let shaft_end = city_lifted + dir * shaft_len;
+
+        // Draw only a short shaft near the city that points toward the satellite
+        gizmos.line(shaft_end, city_lifted, config.color);
+
+        // Arrowhead: draw at the end of the shaft (near the city), pointing toward the satellite
+        let head_len = (config.head_len_pct * total_len).clamp(head_min_km, head_max_km).min(shaft_len * 0.8);
+        let tip_pos = shaft_end;              // tip at end of shaft
+        let base = tip_pos - dir * head_len;  // base moved back toward city
+
+        // Build orthonormal frame
+        let up = dir.any_orthonormal_vector();
+        let right = dir.cross(up).normalize();
+        let radius = head_len * config.head_radius_pct;
+        let a = base + up * radius;
+        let b = base - up * radius * 0.5 + right * radius * 0.8660254;
+        let c = base - up * radius * 0.5 - right * radius * 0.8660254;
+
+        // Tip-connected edges
+        gizmos.line(a, tip_pos, config.color);
+        gizmos.line(b, tip_pos, config.color);
+        gizmos.line(c, tip_pos, config.color);
+        // Base triangle for visual stability
+        gizmos.line(b, a, config.color);
+        gizmos.line(c, b, config.color);
+        gizmos.line(a, c, config.color);
+
+        drawn += 1;
+        if drawn >= config.max_visible {
+            break;
+        }
+    }
+}
 
 fn draw_axes(mut gizmos: Gizmos, query: Query<&Transform, With<ShowAxes>>) {
     for &transform in &query {
@@ -49,11 +185,17 @@ pub fn setup(
 
     // Small sphere at origin to show axes
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0).mesh().ico(5).unwrap())),
-        MeshMaterial3d(materials.add(Color::srgb(0., 0., 0.))),
-        ShowAxes,
+        Mesh3d(meshes.add(Sphere::new(500.0).mesh().ico(5).unwrap())),
+        MeshMaterial3d(materials.add(Color::srgb(1., 0., 0.))),
+        Satellite,
+        Transform::from_xyz(25000., 0., 0.),
     ));
 
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(1.0).mesh().ico(5).unwrap())),
+        MeshMaterial3d(materials.add(Color::srgb(1.0, 0., 0.))),
+        ShowAxes,
+    ));
     commands.spawn((
         PanOrbitCamera::default(),
         Transform::from_xyz(25000.0, 8.0, 4.0),
@@ -77,7 +219,7 @@ fn ui_example_system(
     mut contexts: EguiContexts,
     mut camera: Single<&mut Camera, Without<EguiContext>>,
     window: Single<&mut Window, With<PrimaryWindow>>,
-    mut state: ResMut<UIState>
+    mut state: ResMut<UIState>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut left = egui::SidePanel::left("left_panel")
@@ -173,6 +315,8 @@ fn ui_example_system(
 fn main() {
     App::new()
         .init_resource::<UIState>()
+        .init_resource::<ArrowConfig>()
+        .init_resource::<SatEcef>()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(PanOrbitCameraPlugin)
@@ -181,7 +325,14 @@ fn main() {
             Startup,
             (setup, generate_faces, spawn_city_population_spheres).chain(),
         )
-        .add_systems(Update, draw_axes.after(setup))
+        .add_systems(
+            Update,
+            (
+                draw_axes.after(setup),
+                update_satellite_ecef,
+                draw_city_to_satellite_arrows.after(update_satellite_ecef),
+            ),
+        )
         .add_systems(EguiPrimaryContextPass, ui_example_system)
         .run();
 }
