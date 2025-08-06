@@ -32,13 +32,13 @@ struct SatelliteColor(pub Color);
 // Orbit configuration and state
 #[derive(Resource, Clone, Copy)]
 struct OrbitConfig {
-    altitude_km: f32,      // height above Earth's surface
-    period_minutes: f32,   // orbital period
-    theta_rad: f32,        // current true anomaly in orbit plane
-    theta0_rad: f32,       // initial true anomaly
+    altitude_km: f32,    // height above Earth's surface
+    period_minutes: f32, // orbital period
+    theta_rad: f32,      // current true anomaly in orbit plane
+    theta0_rad: f32,     // initial true anomaly
     paused: bool,
-    inclination_deg: f32,  // inclination i
-    raan_deg: f32,         // RAAN Ω
+    inclination_deg: f32, // inclination i
+    raan_deg: f32,        // RAAN Ω
 }
 
 #[derive(Resource)]
@@ -88,15 +88,23 @@ struct ArrowConfig {
     enabled: bool,
     color: Color,
     max_visible: usize,
-    lift_m: f32,       // lift city endpoint off the surface (meters)
+    lift_m: f32, // lift city endpoint off the surface (meters)
     // tip_offset_m: f32, // offset before satellite tip (meters)
     head_len_pct: f32,
     head_min_m: f32,
     head_max_m: f32,
     head_radius_pct: f32,
-    shaft_len_pct: f32,   // fraction of city->sat distance to draw as shaft
-    shaft_min_m: f32,     // minimum shaft length in meters
-    shaft_max_m: f32,     // maximum shaft length in meters
+    shaft_len_pct: f32, // fraction of city->sat distance to draw as shaft
+    shaft_min_m: f32,   // minimum shaft length in meters
+    shaft_max_m: f32,   // maximum shaft length in meters
+
+    // Distance-to-color gradient
+    gradient_enabled: bool,
+    gradient_near_km: f32, // distance giving "near" color (red)
+    gradient_far_km: f32,  // distance giving "far" color (blue)
+    gradient_near_color: Color,
+    gradient_far_color: Color,
+    gradient_log_scale: bool,
 }
 impl Default for ArrowConfig {
     fn default() -> Self {
@@ -104,15 +112,25 @@ impl Default for ArrowConfig {
             enabled: true,
             color: Color::srgb(0.1, 0.9, 0.3),
             max_visible: 200,
-            lift_m: 1000.0,
+            lift_m: 10000.0,
             // tip_offset_m: 2000.0,
             head_len_pct: 0.02,
             head_min_m: 10_000.0,
             head_max_m: 100_000.0,
             head_radius_pct: 0.4,
-            shaft_len_pct: 0.12,  // draw only the first 12% toward satellite
-            shaft_min_m: 5_000.0,
+            shaft_len_pct: 0.05, // draw only the first 12% toward satellite
+            shaft_min_m: 1_000.0,
             shaft_max_m: 400_000.0,
+
+            // Sensible defaults for LEO–MEO ranges and current app scale
+            gradient_enabled: true,
+            // Typical city-surface to sat distance ranges roughly from ~1,000 km (very close) to ~60,000 km (GEO-ish)
+            gradient_near_km: 1000.0,
+            gradient_far_km: 60000.0,
+            // Red near, blue far
+            gradient_near_color: Color::srgb(1.0, 0.0, 0.0),
+            gradient_far_color: Color::srgb(0.0, 0.0, 1.0),
+            gradient_log_scale: false,
         }
     }
 }
@@ -124,11 +142,13 @@ struct SatEcef(pub Vec3);
 #[derive(Resource)]
 struct UIState {
     name: String,
+    show_axes: bool,
 }
 impl Default for UIState {
     fn default() -> Self {
         Self {
             name: "".to_string(),
+            show_axes: true,
         }
     }
 }
@@ -156,7 +176,7 @@ fn draw_arrow_segment(
     gizmos: &mut Gizmos,
     city: Vec3,
     sat_pos: Vec3,
-    color: Color,
+    fallback_color: Color,
     config: &ArrowConfig,
 ) {
     // constants conversion meters->kilometers
@@ -171,40 +191,61 @@ fn draw_arrow_segment(
     // Compute total city->sat distance from the lifted point
     let total_len = (sat_pos - city_lifted).length();
 
+    // Compute gradient color if enabled
+    let draw_color = if config.gradient_enabled {
+        // Normalize distance into [0,1] with optional log scale
+        let mut near = config.gradient_near_km.max(1e-3);
+        let mut far = config.gradient_far_km.max(near + 1e-3);
+        if near > far {
+            core::mem::swap(&mut near, &mut far);
+        }
+
+        let t = if config.gradient_log_scale {
+            let ln = |x: f32| x.max(1e-3).ln();
+            ((ln(total_len) - ln(near)) / (ln(far) - ln(near))).clamp(0.0, 1.0)
+        } else {
+            ((total_len - near) / (far - near)).clamp(0.0, 1.0)
+        };
+
+        // Lerp near->far (red->blue by default)
+        config
+            .gradient_near_color
+            .mix(&config.gradient_far_color, t)
+    } else {
+        fallback_color
+    };
+
     // Compute a short shaft length near the city only
     let mut shaft_len = config.shaft_len_pct * total_len;
     // clamp by mins/max (convert meters->km)
     let shaft_min_km = config.shaft_min_m / 1000.0;
     let shaft_max_km = config.shaft_max_m / 1000.0;
-    shaft_len = shaft_len.clamp(shaft_min_km, shaft_max_km).min(total_len * 0.9);
+    shaft_len = shaft_len
+        .clamp(shaft_min_km, shaft_max_km)
+        .min(total_len * 0.9);
 
     // Shaft end point along direction toward satellite
     let shaft_end = city_lifted + dir * shaft_len;
 
     // Draw only a short shaft near the city that points toward the satellite
-    gizmos.line(shaft_end, city_lifted, color);
+    gizmos.arrow(city_lifted, shaft_end, draw_color);
 
-    // Arrowhead: draw at the end of the shaft (near the city), pointing toward the satellite
-    let head_len = (config.head_len_pct * total_len).clamp(head_min_km, head_max_km).min(shaft_len * 0.8);
-    let tip_pos = shaft_end;              // tip at end of shaft
-    let base = tip_pos - dir * head_len;  // base moved back toward city
-
-    // Build orthonormal frame
-    let up = dir.any_orthonormal_vector();
-    let right = dir.cross(up).normalize();
-    let radius = head_len * config.head_radius_pct;
-    let a = base + up * radius;
-    let b = base - up * radius * 0.5 + right * radius * 0.8660254;
-    let c = base - up * radius * 0.5 - right * radius * 0.8660254;
-
-    // Tip-connected edges
-    gizmos.line(a, tip_pos, color);
-    gizmos.line(b, tip_pos, color);
-    gizmos.line(c, tip_pos, color);
-    // Base triangle for visual stability
-    gizmos.line(b, a, color);
-    gizmos.line(c, b, color);
-    gizmos.line(a, c, color);
+    // Arrowhead placeholder kept commented; would also use draw_color:
+    // let head_len = (config.head_len_pct * total_len).clamp(head_min_km, head_max_km).min(shaft_len * 0.8);
+    // let tip_pos = shaft_end;              // tip at end of shaft
+    // let base = tip_pos - dir * head_len;  // base moved back toward city
+    // let up = dir.any_orthonormal_vector();
+    // let right = dir.cross(up).normalize();
+    // let radius = head_len * config.head_radius_pct;
+    // let a = base + up * radius;
+    // let b = base - up * radius * 0.5 + right * radius * 0.8660254;
+    // let c = base - up * radius * 0.5 - right * radius * 0.8660254;
+    // gizmos.line(a, tip_pos, draw_color);
+    // gizmos.line(b, tip_pos, draw_color);
+    // gizmos.line(c, tip_pos, draw_color);
+    // gizmos.line(b, a, draw_color);
+    // gizmos.line(c, b, draw_color);
+    // gizmos.line(a, c, draw_color);
 }
 
 // Draw arrows from every city to all visible satellites, color-coded per satellite
@@ -252,7 +293,10 @@ fn draw_city_to_satellite_arrows(
     }
 }
 
-fn draw_axes(mut gizmos: Gizmos, query: Query<&Transform, With<ShowAxes>>) {
+fn draw_axes(mut gizmos: Gizmos, query: Query<&Transform, With<ShowAxes>>, state: Res<UIState>) {
+    if !state.show_axes {
+        return;
+    }
     for &transform in &query {
         gizmos.axes(transform, 8000.0);
     }
@@ -378,16 +422,51 @@ fn ui_example_system(
     window: Single<&mut Window, With<PrimaryWindow>>,
     mut state: ResMut<UIState>,
     mut orbits: ResMut<OrbitConfigs>,
+    mut arrows_cfg: ResMut<ArrowConfig>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut left = egui::SidePanel::left("left_panel")
         .resizable(true)
         .show(ctx, |ui| {
-            ui.label("Left resizeable panel");
-            // ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
-            ui.horizontal(|ui| {
-                ui.label("Name");
-                ui.text_edit_singleline(&mut state.name);
+            ui.separator();            
+
+            ui.heading("Rendering");
+            ui.checkbox(&mut state.show_axes, "Show axes");
+
+            ui.separator();            
+            ui.heading("Orbit controls");
+            ui.separator();
+            // Control only primary satellite (id 0)
+            let orbit = &mut orbits.items[0];
+            ui.checkbox(&mut orbit.paused, "Paused");
+            ui.add(
+                egui::Slider::new(&mut orbit.altitude_km, 100.0..=60000.0).text("Altitude (km)"),
+            );
+            ui.add(
+                egui::Slider::new(&mut orbit.period_minutes, 10.0..=2000.0).text("Period (min)"),
+            );
+            ui.add(
+                egui::Slider::new(&mut orbit.inclination_deg, 0.0..=180.0)
+                    .text("Inclination (deg)"),
+            );
+            ui.add(egui::Slider::new(&mut orbit.raan_deg, 0.0..=360.0).text("RAAN (deg)"));
+            if ui.button("Reset phase").clicked() {
+                orbit.theta_rad = orbit.theta0_rad;
+            }
+
+            ui.separator();
+            ui.heading("Arrow rendering");
+            ui.separator();            
+
+            ui.checkbox(&mut arrows_cfg.enabled, "Show arrows");
+            ui.checkbox(&mut arrows_cfg.gradient_enabled, "Distance color gradient (red→blue)");
+            ui.collapsing("Gradient settings", |ui| {
+                ui.label("Distance range (km)");
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_near_km, 10.0..=200000.0).text("Near km"));
+                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_far_km, 10.0..=200000.0).text("Far km"));
+                });
+                ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
             });
         })
         .response
@@ -407,21 +486,8 @@ fn ui_example_system(
     let mut top = egui::TopBottomPanel::top("top_panel")
         .resizable(true)
         .show(ctx, |ui| {
-            ui.label("Orbit controls");
-            ui.separator();
-            // Control only primary satellite (id 0)
-            let orbit = &mut orbits.items[0];
-            ui.checkbox(&mut orbit.paused, "Paused");
-            ui.add(egui::Slider::new(&mut orbit.altitude_km, 100.0..=60000.0).text("Altitude (km)"));
-            ui.add(egui::Slider::new(&mut orbit.period_minutes, 10.0..=2000.0).text("Period (min)"));
-            ui.add(egui::Slider::new(&mut orbit.inclination_deg, 0.0..=180.0).text("Inclination (deg)"));
-            ui.add(egui::Slider::new(&mut orbit.raan_deg, 0.0..=360.0).text("RAAN (deg)"));
-            if ui.button("Reset phase").clicked() {
-                orbit.theta_rad = orbit.theta0_rad;
-            }
-            ui.separator();
-            ui.label("Top resizeable panel");
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
+
         })
         .response
         .rect
@@ -501,7 +567,7 @@ fn main() {
             Update,
             (
                 draw_axes.after(setup),
-                update_satellite_orbit,                // write satellite transforms
+                update_satellite_orbit, // write satellite transforms
                 // keep update_satellite_ecef for potential future use, but arrows don't depend on it
                 update_satellite_ecef.after(update_satellite_orbit),
                 // draw arrows after transforms are updated; no dependency on SatEcef anymore

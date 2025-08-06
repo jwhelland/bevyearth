@@ -136,8 +136,10 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
     let t1 = (-b - sqrt_d) / (2.0 * a);
     let t2 = (-b + sqrt_d) / (2.0 * a);
 
-    // If either intersection parameter lies within the segment [0,1], LOS is blocked.
-    let hits_segment = (0.0..=1.0).contains(&t1) || (0.0..=1.0).contains(&t2);
+    // Exclude grazing at the city endpoint: require t > eps (in km units).
+    let eps: f32 = 1e-5; // 1e-5 km = 1 cm
+    // If either intersection parameter lies within (eps, 1], LOS is blocked.
+    let hits_segment = ((t1 > eps) && (t1 <= 1.0)) || ((t2 > eps) && (t2 <= 1.0));
     !hits_segment
 }
 
