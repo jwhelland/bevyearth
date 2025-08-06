@@ -15,6 +15,7 @@ mod cities;
 mod coord;
 mod earth;
 use crate::earth::EARTH_RADIUS_KM;
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use cities::{CitiesEcef, spawn_city_population_spheres};
 use coord::{hemisphere_prefilter, los_visible_ecef};
 use earth::generate_faces;
@@ -123,7 +124,7 @@ impl Default for ArrowConfig {
             shaft_max_m: 400_000.0,
 
             // Sensible defaults for LEO–MEO ranges and current app scale
-            gradient_enabled: true,
+            gradient_enabled: false,
             // Typical city-surface to sat distance ranges roughly from ~1,000 km (very close) to ~60,000 km (GEO-ish)
             gradient_near_km: 1000.0,
             gradient_far_km: 60000.0,
@@ -141,14 +142,29 @@ struct SatEcef(pub Vec3);
 
 #[derive(Resource)]
 struct UIState {
-    name: String,
     show_axes: bool,
 }
+
 impl Default for UIState {
     fn default() -> Self {
+        Self { show_axes: false }
+    }
+}
+
+/// Simulation time resource
+#[derive(Resource)]
+struct SimulationTime {
+    /// Simulated time in UTC
+    current_utc: DateTime<Utc>,
+    /// How fast sim time progresses relative to real time
+    time_scale: f32,
+}
+
+impl Default for SimulationTime {
+    fn default() -> Self {
         Self {
-            name: "".to_string(),
-            show_axes: true,
+            current_utc: Utc::now(),
+            time_scale: 1.0,
         }
     }
 }
@@ -309,15 +325,37 @@ fn rot_x(v: Vec3, angle_rad: f32) -> Vec3 {
 
 fn rot_z(v: Vec3, angle_rad: f32) -> Vec3 {
     let (s, c) = angle_rad.sin_cos();
-    Vec3::new(c * v.x - s * v.z, v.y, s * v.x + c * v.z)
+    // Proper rotation around Z axis: x' = c*x - s*y, y' = s*x + c*y, z unchanged
+    Vec3::new(c * v.x - s * v.y, s * v.x + c * v.y, v.z)
 }
+
 
 /// System: advance simple circular orbit and write Satellite Transform
 fn update_satellite_orbit(
     time: Res<Time>,
     mut cfgs: ResMut<OrbitConfigs>,
+    mut sim_time: ResMut<SimulationTime>,
     mut sat_query: Query<(&mut Transform, &SatelliteId), With<Satellite>>,
 ) {
+    // Always compute scaled delta; use for phase updates, and conditionally for time progression
+    let mut scaled = time.delta_secs() * sim_time.time_scale;
+    // Clamp to non-negative delta in case of odd time flow
+    scaled = scaled.max(0.0);
+
+    // Advance simulation clock: use primary (id 0) pause as the authority
+    let paused = cfgs.items[0].paused;
+    if !paused {
+        // Advance UTC using chrono::Duration (whole seconds + fractional nanoseconds)
+        let whole = scaled.trunc() as i64;
+        let nanos = ((scaled - scaled.trunc()) * 1_000_000_000.0) as i64;
+        if whole != 0 {
+            sim_time.current_utc = sim_time.current_utc + Duration::seconds(whole);
+        }
+        if nanos != 0 {
+            sim_time.current_utc = sim_time.current_utc + Duration::nanoseconds(nanos);
+        }
+    }
+
     for (mut t, id) in sat_query.iter_mut() {
         let cfg = &mut cfgs.items[id.0 as usize];
 
@@ -327,9 +365,9 @@ fn update_satellite_orbit(
         // Angular rate (rad/s)
         let omega = TAU / (cfg.period_minutes.max(0.1) * 60.0);
 
-        // Advance phase
+        // Advance phase (respect per-satellite pause)
         if !cfg.paused {
-            cfg.theta_rad = (cfg.theta_rad + omega * time.delta_secs()).rem_euclid(TAU);
+            cfg.theta_rad = (cfg.theta_rad + omega * scaled).rem_euclid(TAU);
         }
 
         // Position in orbital plane (x'z' plane around y'=0): start along +x', CCW toward +z'
@@ -347,6 +385,7 @@ fn update_satellite_orbit(
         t.translation = pos;
     }
 }
+
 
 pub fn setup(
     mut commands: Commands,
@@ -368,7 +407,11 @@ pub fn setup(
 
     commands.spawn((
         Mesh3d(sat_mesh.clone()),
-        MeshMaterial3d(materials.add(red)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: red,
+            emissive: red.to_linear(),
+            ..Default::default()
+        })),
         Satellite,
         SatelliteId(0),
         SatelliteColor(red),
@@ -376,7 +419,11 @@ pub fn setup(
     ));
     commands.spawn((
         Mesh3d(sat_mesh.clone()),
-        MeshMaterial3d(materials.add(green)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: green,
+            emissive: green.to_linear(),
+            ..Default::default()
+        })),
         Satellite,
         SatelliteId(1),
         SatelliteColor(green),
@@ -384,7 +431,11 @@ pub fn setup(
     ));
     commands.spawn((
         Mesh3d(sat_mesh),
-        MeshMaterial3d(materials.add(blue)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: blue,
+            emissive: blue.to_linear(),
+            ..Default::default()
+        })),
         Satellite,
         SatelliteId(2),
         SatelliteColor(blue),
@@ -421,50 +472,49 @@ fn ui_example_system(
     mut camera: Single<&mut Camera, Without<EguiContext>>,
     window: Single<&mut Window, With<PrimaryWindow>>,
     mut state: ResMut<UIState>,
-    mut orbits: ResMut<OrbitConfigs>,
     mut arrows_cfg: ResMut<ArrowConfig>,
+    mut sim_time: ResMut<SimulationTime>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut left = egui::SidePanel::left("left_panel")
         .resizable(true)
         .show(ctx, |ui| {
-            ui.separator();            
+            ui.separator();
 
             ui.heading("Rendering");
+            ui.separator();
             ui.checkbox(&mut state.show_axes, "Show axes");
 
-            ui.separator();            
-            ui.heading("Orbit controls");
             ui.separator();
-            // Control only primary satellite (id 0)
-            let orbit = &mut orbits.items[0];
-            ui.checkbox(&mut orbit.paused, "Paused");
-            ui.add(
-                egui::Slider::new(&mut orbit.altitude_km, 100.0..=60000.0).text("Altitude (km)"),
-            );
-            ui.add(
-                egui::Slider::new(&mut orbit.period_minutes, 10.0..=2000.0).text("Period (min)"),
-            );
-            ui.add(
-                egui::Slider::new(&mut orbit.inclination_deg, 0.0..=180.0)
-                    .text("Inclination (deg)"),
-            );
-            ui.add(egui::Slider::new(&mut orbit.raan_deg, 0.0..=360.0).text("RAAN (deg)"));
-            if ui.button("Reset phase").clicked() {
-                orbit.theta_rad = orbit.theta0_rad;
-            }
+            ui.heading("Simulation time");
+            ui.horizontal(|ui| {
+                ui.label("Scale:");
+                ui.add(egui::Slider::new(&mut sim_time.time_scale, 0.0..=1000.0).logarithmic(true));
+                if ui.button("1x").clicked() {
+                    sim_time.time_scale = 1.0;
+                }
+            });
 
             ui.separator();
             ui.heading("Arrow rendering");
-            ui.separator();            
+            ui.separator();
 
             ui.checkbox(&mut arrows_cfg.enabled, "Show arrows");
-            ui.checkbox(&mut arrows_cfg.gradient_enabled, "Distance color gradient (red→blue)");
+            ui.checkbox(
+                &mut arrows_cfg.gradient_enabled,
+                "Distance color gradient (red→blue)",
+            );
             ui.collapsing("Gradient settings", |ui| {
                 ui.label("Distance range (km)");
                 ui.horizontal(|ui| {
-                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_near_km, 10.0..=200000.0).text("Near km"));
-                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_far_km, 10.0..=200000.0).text("Far km"));
+                    ui.add(
+                        egui::Slider::new(&mut arrows_cfg.gradient_near_km, 10.0..=200000.0)
+                            .text("Near km"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut arrows_cfg.gradient_far_km, 10.0..=200000.0)
+                            .text("Far km"),
+                    );
                 });
                 ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
             });
@@ -486,8 +536,22 @@ fn ui_example_system(
     let mut top = egui::TopBottomPanel::top("top_panel")
         .resizable(true)
         .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.strong("UTC:");
+                // Show ISO 8601 Z time
+                ui.monospace(
+                    sim_time
+                        .current_utc
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+                if (sim_time.time_scale - 1.0).abs() > 1e-6 {
+                    ui.separator();
+                    ui.label(format!("{:.2}x", sim_time.time_scale));
+                }
+                ui.add_space(10.0);
+                ui.separator();
+            });
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
-
         })
         .response
         .rect
@@ -554,7 +618,7 @@ fn main() {
         .init_resource::<UIState>()
         .init_resource::<ArrowConfig>()
         .init_resource::<SatEcef>()
-        .init_resource::<OrbitConfigs>()
+        .init_resource::<SimulationTime>()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(PanOrbitCameraPlugin)
@@ -567,7 +631,7 @@ fn main() {
             Update,
             (
                 draw_axes.after(setup),
-                update_satellite_orbit, // write satellite transforms
+                update_satellite_orbit, // write satellite transforms and advance sim time
                 // keep update_satellite_ecef for potential future use, but arrows don't depend on it
                 update_satellite_ecef.after(update_satellite_orbit),
                 // draw arrows after transforms are updated; no dependency on SatEcef anymore

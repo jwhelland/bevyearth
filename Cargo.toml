@@ -9,6 +9,7 @@ bevy-inspector-egui = "0.32.0"
 bevy_dev_tools = "0.16.1"
 bevy_egui = "0.35.1"
 bevy_panorbit_camera = "0.27.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
