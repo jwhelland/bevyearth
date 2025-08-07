@@ -6,103 +6,159 @@ use bevy::render::view::RenderLayers;
 use bevy::{prelude::*, render::camera::Viewport, window::PrimaryWindow};
 
 use bevy_egui::{
-    EguiContext, EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
-    PrimaryEguiContext, egui,
+    egui, EguiContext, EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
+    PrimaryEguiContext,
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+// Additional imports
+use bevy_egui::egui::Color32;
+use bevy::math::DVec3;
+use std::sync::{Arc, Mutex};
 
 mod cities;
 mod coord;
 mod earth;
 use crate::earth::EARTH_RADIUS_KM;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use cities::{CitiesEcef, spawn_city_population_spheres};
+use cities::{spawn_city_population_spheres, CitiesEcef};
 use coord::{hemisphere_prefilter, los_visible_ecef};
 use earth::generate_faces;
-use std::f32::consts::TAU;
 
+// UI/state for dynamic satellites
 #[derive(Component)]
 struct Satellite;
 
 #[derive(Component)]
-struct SatelliteId(pub u8);
-
-#[derive(Component)]
 struct SatelliteColor(pub Color);
 
-// Orbit configuration and state
-#[derive(Resource, Clone, Copy)]
-struct OrbitConfig {
-    altitude_km: f32,    // height above Earth's surface
-    period_minutes: f32, // orbital period
-    theta_rad: f32,      // current true anomaly in orbit plane
-    theta0_rad: f32,     // initial true anomaly
-    paused: bool,
-    inclination_deg: f32, // inclination i
-    raan_deg: f32,        // RAAN Ω
+#[derive(Resource, Default)]
+struct SatelliteStore {
+    items: Vec<SatEntry>,
+    next_color_hue: f32,
+}
+
+struct SatEntry {
+    norad: u32,
+    name: Option<String>,
+    color: Color,
+    entity: Option<Entity>,
+    // fetched TLE
+    tle: Option<TleData>,
+    // sgp4 2.3.0: hold parsed Constants and propagate per frame
+    propagator: Option<sgp4::Constants>,
+    // last error (if any)
+    error: Option<String>,
+}
+
+#[derive(Resource, Default)]
+struct RightPanelUI {
+    input: String,
+    error: Option<String>,
+}
+
+// Fetch plumbing
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+// For thread-safe receiver inside a Bevy Resource
+// Arc<Mutex<...>> import is already present above
+
+enum FetchCommand {
+    Fetch(u32),
+}
+
+enum FetchResultMsg {
+    Success {
+        norad: u32,
+        name: Option<String>,
+        line1: String,
+        line2: String,
+        epoch_utc: DateTime<Utc>,
+    },
+    Failure { norad: u32, error: String },
 }
 
 #[derive(Resource)]
-struct OrbitConfigs {
-    items: [OrbitConfig; 3],
+struct FetchChannels {
+    cmd_tx: Sender<FetchCommand>,
+    res_rx: Arc<Mutex<Receiver<FetchResultMsg>>>,
 }
 
-impl Default for OrbitConfigs {
-    fn default() -> Self {
-        // Base config (matches previous default)
-        let base = OrbitConfig::default();
+// TLE and utilities
+struct TleData {
+    name: Option<String>,
+    line1: String,
+    line2: String,
+    epoch_utc: DateTime<Utc>,
+}
 
-        // Two additional with distinct parameters
-        let mut sat1 = base;
-        sat1.inclination_deg = 70.0;
-        sat1.raan_deg = 60.0;
-        sat1.theta_rad = TAU * 0.33;
-
-        let mut sat2 = base;
-        sat2.inclination_deg = 20.0;
-        sat2.raan_deg = 140.0;
-        sat2.theta_rad = TAU * 0.66;
-
-        Self {
-            items: [base, sat1, sat2],
-        }
+fn parse_tle_epoch_to_utc(line1: &str) -> Option<DateTime<Utc>> {
+    // TLE line1 epoch fields (columns 19–32, 1-based; 18..32 0-based)
+    if line1.len() < 32 {
+        return None;
     }
-}
-
-impl Default for OrbitConfig {
-    fn default() -> Self {
-        Self {
-            altitude_km: 25000.0,
-            period_minutes: 94.0,
-            theta_rad: 0.0,
-            theta0_rad: 0.0,
-            paused: false,
-            inclination_deg: 53.0,
-            raan_deg: 0.0,
-        }
+    let s = &line1[18..32];
+    let mut parts = s.trim().split('.');
+    let yyddd = parts.next()?;
+    let frac = parts.next().unwrap_or("0");
+    if yyddd.len() < 3 {
+        return None;
     }
+    let (yy_str, ddd_str) = yyddd.split_at(2);
+    let yy: i32 = yy_str.parse().ok()?;
+    let ddd: i32 = ddd_str.parse().ok()?;
+    let year = if yy >= 57 { 1900 + yy } else { 2000 + yy };
+    let jan1 = chrono::NaiveDate::from_ymd_opt(year, 1, 1)?;
+    let date = jan1.checked_add_signed(chrono::Duration::days((ddd - 1) as i64))?;
+    let frac_sec: f64 = match format!("0.{}", frac).parse::<f64>() {
+        Ok(v) => v * 86400.0,
+        Err(_) => return None,
+    };
+    let secs = frac_sec.trunc() as i64;
+    let nanos = ((frac_sec - (secs as f64)) * 1e9).round() as i64;
+    let dt = date.and_hms_opt(0, 0, 0)?;
+    let mut ndt = chrono::NaiveDateTime::new(date, dt.time());
+    ndt = ndt + chrono::Duration::seconds(secs);
+    ndt = ndt + chrono::Duration::nanoseconds(nanos);
+    Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
 }
 
-// Arrow rendering config
+fn minutes_since_epoch(sim_utc: DateTime<Utc>, epoch: DateTime<Utc>) -> f64 {
+    let delta = sim_utc - epoch;
+    delta.num_seconds() as f64 / 60.0 + (delta.subsec_nanos() as f64) / 60.0 / 1.0e9
+}
+
+// Approximate GMST for visualization
+fn gmst_rad(t: DateTime<Utc>) -> f64 {
+    let secs = t.timestamp() as f64 + (t.timestamp_subsec_nanos() as f64) * 1e-9;
+    let omega = std::f64::consts::TAU / 86164.0905_f64;
+    (secs * omega).rem_euclid(std::f64::consts::TAU)
+}
+
+// Rotate ECI (TEME) -> ECEF using simple GMST rotation about Z
+fn eci_to_ecef_km(eci: DVec3, gmst: f64) -> DVec3 {
+    let (s, c) = gmst.sin_cos();
+    let x = c * eci.x - s * eci.y;
+    let y = s * eci.x + c * eci.y;
+    DVec3::new(x, y, eci.z)
+}
+
+// Arrow rendering config (unchanged core)
 #[derive(Resource)]
 struct ArrowConfig {
     enabled: bool,
     color: Color,
     max_visible: usize,
-    lift_m: f32, // lift city endpoint off the surface (meters)
-    // tip_offset_m: f32, // offset before satellite tip (meters)
+    lift_m: f32,
     head_len_pct: f32,
     head_min_m: f32,
     head_max_m: f32,
     head_radius_pct: f32,
-    shaft_len_pct: f32, // fraction of city->sat distance to draw as shaft
-    shaft_min_m: f32,   // minimum shaft length in meters
-    shaft_max_m: f32,   // maximum shaft length in meters
-
-    // Distance-to-color gradient
+    shaft_len_pct: f32,
+    shaft_min_m: f32,
+    shaft_max_m: f32,
     gradient_enabled: bool,
-    gradient_near_km: f32, // distance giving "near" color (red)
-    gradient_far_km: f32,  // distance giving "far" color (blue)
+    gradient_near_km: f32,
+    gradient_far_km: f32,
     gradient_near_color: Color,
     gradient_far_color: Color,
     gradient_log_scale: bool,
@@ -114,21 +170,16 @@ impl Default for ArrowConfig {
             color: Color::srgb(0.1, 0.9, 0.3),
             max_visible: 200,
             lift_m: 10000.0,
-            // tip_offset_m: 2000.0,
             head_len_pct: 0.02,
             head_min_m: 10_000.0,
             head_max_m: 100_000.0,
             head_radius_pct: 0.4,
-            shaft_len_pct: 0.05, // draw only the first 12% toward satellite
+            shaft_len_pct: 0.05,
             shaft_min_m: 1_000.0,
             shaft_max_m: 400_000.0,
-
-            // Sensible defaults for LEO–MEO ranges and current app scale
             gradient_enabled: false,
-            // Typical city-surface to sat distance ranges roughly from ~1,000 km (very close) to ~60,000 km (GEO-ish)
             gradient_near_km: 1000.0,
             gradient_far_km: 60000.0,
-            // Red near, blue far
             gradient_near_color: Color::srgb(1.0, 0.0, 0.0),
             gradient_far_color: Color::srgb(0.0, 0.0, 1.0),
             gradient_log_scale: false,
@@ -136,7 +187,7 @@ impl Default for ArrowConfig {
     }
 }
 
-// Satellite ECEF position resource (in kilometers to match EARTH_RADIUS_KM)
+// Satellite ECEF position resource (in kilometers)
 #[derive(Resource, Deref, DerefMut, Default)]
 struct SatEcef(pub Vec3);
 
@@ -144,7 +195,6 @@ struct SatEcef(pub Vec3);
 struct UIState {
     show_axes: bool,
 }
-
 impl Default for UIState {
     fn default() -> Self {
         Self { show_axes: false }
@@ -154,12 +204,9 @@ impl Default for UIState {
 /// Simulation time resource
 #[derive(Resource)]
 struct SimulationTime {
-    /// Simulated time in UTC
     current_utc: DateTime<Utc>,
-    /// How fast sim time progresses relative to real time
     time_scale: f32,
 }
-
 impl Default for SimulationTime {
     fn default() -> Self {
         Self {
@@ -168,26 +215,115 @@ impl Default for SimulationTime {
         }
     }
 }
-// The `ShowAxes` component is attached to an entity to get the `draw_axes` system to
-// display axes according to its Transform component.
+
+// Background TLE worker setup at startup
+fn start_tle_worker() -> FetchChannels {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<FetchCommand>();
+    let (res_tx, res_rx) = mpsc::channel::<FetchResultMsg>();
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async move {
+            let client = reqwest::Client::new();
+
+            // Helper: scan arbitrary response for a valid TLE pair, optionally with name
+            fn extract_tle_block(body: &str, requested_sat: u32) -> anyhow::Result<(Option<String>, String, String)> {
+                let mut lines: Vec<String> = Vec::new();
+                for raw in body.lines() {
+                    let line = raw.trim_matches(|c| c == '\u{feff}' || c == '\r' || c == '\n' || c == ' '); // trim BOM/CRLF/space
+                    if line.is_empty() {
+                        continue;
+                    }
+                    lines.push(line.to_string());
+                }
+                // find first pair 1/2 with matching sat number
+                let sat_fmt = format!("{:05}", requested_sat);
+                let mut i = 0usize;
+                while i + 1 < lines.len() {
+                    let l = &lines[i];
+                    let n = if i >= 1 { Some(lines[i - 1].clone()) } else { None };
+                    if l.starts_with('1') {
+                        let l1 = l;
+                        let l2 = &lines[i + 1];
+                        if l2.starts_with('2') {
+                            let sat_ok = l1.len() >= 7 && l2.len() >= 7 && &l1[2..7] == sat_fmt && &l2[2..7] == sat_fmt;
+                            if sat_ok {
+                                // Prefer a text name line immediately before l1 if it is not a TLE line
+                                let name = if let Some(p) = n {
+                                    if !p.starts_with('1') && !p.starts_with('2') { Some(p) } else { None }
+                                } else { None };
+                                return Ok((name, l1.to_string(), l2.to_string()));
+                            }
+                        }
+                    }
+                    i += 1;
+                }
+                let sample: String = body.lines().take(6).collect::<Vec<_>>().join("\\n");
+                anyhow::bail!("No valid TLE pair found for {}. Sample: {}", requested_sat, sample);
+            }
+
+            while let Ok(cmd) = cmd_rx.recv() {
+                match cmd {
+                    FetchCommand::Fetch(norad) => {
+                        let url = format!(
+                            "https://celestrak.org/NORAD/elements/gp.php?CATNR={}&FORMAT=TLE",
+                            norad
+                        );
+                        let send = |m| {
+                            let _ = res_tx.send(m);
+                        };
+                        let res = async {
+                            let resp = client
+                                .get(&url)
+                                .header("accept", "text/plain")
+                                .send()
+                                .await?;
+                            let status = resp.status();
+                            let body = resp.text().await?;
+                            // Debug log full fetch result (status, first lines, and any extracted tuple)
+                            println!("[TLE FETCH] norad={} status={} url={} bytes={}...", norad, status, url, body.len());
+                            // Attempt parse even if not 2xx, to capture HTML/text bodies for debugging
+                            let (name, l1, l2) = extract_tle_block(&body, norad)?;
+                            println!("[TLE PARSED] norad={} name={}\\n{}\\n{}", norad, name.clone().unwrap_or_else(|| "None".into()), l1, l2);
+                            // If HTTP not success, still bail after logging to surface error to UI
+                            if !status.is_success() {
+                                anyhow::bail!("HTTP {} after parse", status);
+                            }
+                            let epoch = parse_tle_epoch_to_utc(&l1).unwrap_or_else(|| Utc::now());
+                            Ok::<_, anyhow::Error>((name, l1, l2, epoch))
+                        }
+                        .await;
+                        match res {
+                            Ok((name, line1, line2, epoch_utc)) => {
+                                println!("[TLE RESULT] norad={} SUCCESS epoch={}", norad, epoch_utc.to_rfc3339());
+                                send(FetchResultMsg::Success { norad, name, line1, line2, epoch_utc })
+                            }
+                            Err(e) => {
+                                eprintln!("[TLE RESULT] norad={} FAILURE: {}", norad, e);
+                                send(FetchResultMsg::Failure { norad, error: e.to_string() })
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+    FetchChannels { cmd_tx, res_rx: Arc::new(Mutex::new(res_rx)) }
+}
+
+// The `ShowAxes` component is attached to an entity to get the `draw_axes` system to display axes.
 #[derive(Component)]
 struct ShowAxes;
 
-// System: update satellite ECEF resource from Satellite entity transform
+// Systems
 fn update_satellite_ecef(
-    sat_query: Query<(&Transform, &SatelliteId), With<Satellite>>,
+    sat_query: Query<&Transform, With<Satellite>>,
     mut sat_res: ResMut<SatEcef>,
 ) {
-    // Retained for potential future use but no longer used by arrow drawing.
-    for (t, id) in sat_query.iter() {
-        if id.0 == 0 {
-            sat_res.0 = t.translation;
-            break;
-        }
+    if let Some(t) = sat_query.iter().next() {
+        sat_res.0 = t.translation;
     }
 }
 
-// Reusable arrow drawing that matches previous single-satellite math
 fn draw_arrow_segment(
     gizmos: &mut Gizmos,
     city: Vec3,
@@ -199,72 +335,42 @@ fn draw_arrow_segment(
     let lift_km = config.lift_m / 1000.0;
     let head_min_km = config.head_min_m / 1000.0;
     let head_max_km = config.head_max_m / 1000.0;
-
-    // Direction and lifted city endpoint to avoid z-fighting with globe
+    // Direction and lifted city endpoint
     let dir = (sat_pos - city).normalize();
     let city_lifted = city.normalize() * (EARTH_RADIUS_KM + lift_km);
-
-    // Compute total city->sat distance from the lifted point
     let total_len = (sat_pos - city_lifted).length();
 
-    // Compute gradient color if enabled
+    // color gradient
     let draw_color = if config.gradient_enabled {
-        // Normalize distance into [0,1] with optional log scale
         let mut near = config.gradient_near_km.max(1e-3);
         let mut far = config.gradient_far_km.max(near + 1e-3);
         if near > far {
             core::mem::swap(&mut near, &mut far);
         }
-
         let t = if config.gradient_log_scale {
             let ln = |x: f32| x.max(1e-3).ln();
             ((ln(total_len) - ln(near)) / (ln(far) - ln(near))).clamp(0.0, 1.0)
         } else {
             ((total_len - near) / (far - near)).clamp(0.0, 1.0)
         };
-
-        // Lerp near->far (red->blue by default)
-        config
-            .gradient_near_color
-            .mix(&config.gradient_far_color, t)
+        config.gradient_near_color.mix(&config.gradient_far_color, t)
     } else {
         fallback_color
     };
 
-    // Compute a short shaft length near the city only
     let mut shaft_len = config.shaft_len_pct * total_len;
-    // clamp by mins/max (convert meters->km)
     let shaft_min_km = config.shaft_min_m / 1000.0;
     let shaft_max_km = config.shaft_max_m / 1000.0;
     shaft_len = shaft_len
         .clamp(shaft_min_km, shaft_max_km)
         .min(total_len * 0.9);
 
-    // Shaft end point along direction toward satellite
     let shaft_end = city_lifted + dir * shaft_len;
-
-    // Draw only a short shaft near the city that points toward the satellite
     gizmos.arrow(city_lifted, shaft_end, draw_color);
 
-    // Arrowhead placeholder kept commented; would also use draw_color:
-    // let head_len = (config.head_len_pct * total_len).clamp(head_min_km, head_max_km).min(shaft_len * 0.8);
-    // let tip_pos = shaft_end;              // tip at end of shaft
-    // let base = tip_pos - dir * head_len;  // base moved back toward city
-    // let up = dir.any_orthonormal_vector();
-    // let right = dir.cross(up).normalize();
-    // let radius = head_len * config.head_radius_pct;
-    // let a = base + up * radius;
-    // let b = base - up * radius * 0.5 + right * radius * 0.8660254;
-    // let c = base - up * radius * 0.5 - right * radius * 0.8660254;
-    // gizmos.line(a, tip_pos, draw_color);
-    // gizmos.line(b, tip_pos, draw_color);
-    // gizmos.line(c, tip_pos, draw_color);
-    // gizmos.line(b, a, draw_color);
-    // gizmos.line(c, b, draw_color);
-    // gizmos.line(a, c, draw_color);
+    let _ = (head_min_km, head_max_km); // reserved for potential arrowhead
 }
 
-// Draw arrows from every city to all visible satellites, color-coded per satellite
 fn draw_city_to_satellite_arrows(
     mut gizmos: Gizmos,
     sat_query: Query<(&Transform, Option<&SatelliteColor>), With<Satellite>>,
@@ -274,11 +380,7 @@ fn draw_city_to_satellite_arrows(
     if !config.enabled {
         return;
     }
-    let Some(cities) = cities else {
-        return;
-    };
-
-    // Collect satellites positions and colors
+    let Some(cities) = cities else { return };
     let mut sats: Vec<(Vec3, Color)> = Vec::new();
     for (t, color_comp) in sat_query.iter() {
         let color = color_comp.map(|c| c.0).unwrap_or(config.color);
@@ -291,16 +393,13 @@ fn draw_city_to_satellite_arrows(
     let mut drawn = 0usize;
     'outer: for &city in cities.iter() {
         for &(sat_pos, sat_color) in &sats {
-            // Fast prefilter and LOS occlusion by Earth
             if !hemisphere_prefilter(city, sat_pos, EARTH_RADIUS_KM) {
                 continue;
             }
             if !los_visible_ecef(city, sat_pos, EARTH_RADIUS_KM) {
                 continue;
             }
-
             draw_arrow_segment(&mut gizmos, city, sat_pos, sat_color, &config);
-
             drawn += 1;
             if drawn >= config.max_visible {
                 break 'outer;
@@ -318,155 +417,77 @@ fn draw_axes(mut gizmos: Gizmos, query: Query<&Transform, With<ShowAxes>>, state
     }
 }
 
-fn rot_x(v: Vec3, angle_rad: f32) -> Vec3 {
-    let (s, c) = angle_rad.sin_cos();
-    Vec3::new(v.x, c * v.y - s * v.z, s * v.y + c * v.z)
+// Advance simulation UTC by scale
+fn advance_simulation_clock(time: Res<Time>, mut sim_time: ResMut<SimulationTime>) {
+    let scaled = (time.delta_secs() * sim_time.time_scale).max(0.0);
+    let whole = scaled.trunc() as i64;
+    let nanos = ((scaled - scaled.trunc()) * 1_000_000_000.0) as i64;
+    if whole != 0 {
+        sim_time.current_utc = sim_time.current_utc + Duration::seconds(whole);
+    }
+    if nanos != 0 {
+        sim_time.current_utc = sim_time.current_utc + Duration::nanoseconds(nanos);
+    }
 }
 
-fn rot_z(v: Vec3, angle_rad: f32) -> Vec3 {
-    let (s, c) = angle_rad.sin_cos();
-    // Proper rotation around Z axis: x' = c*x - s*y, y' = s*x + c*y, z unchanged
-    Vec3::new(c * v.x - s * v.y, s * v.x + c * v.y, v.z)
-}
-
-
-/// System: advance simple circular orbit and write Satellite Transform
-fn update_satellite_orbit(
-    time: Res<Time>,
-    mut cfgs: ResMut<OrbitConfigs>,
-    mut sim_time: ResMut<SimulationTime>,
-    mut sat_query: Query<(&mut Transform, &SatelliteId), With<Satellite>>,
+// Propagate satellites via SGP4 and set transforms
+fn propagate_satellites_system(
+    store: Res<SatelliteStore>,
+    sim_time: Res<SimulationTime>,
+    mut q: Query<(&mut Transform, &mut SatelliteColor, Entity), With<Satellite>>,
 ) {
-    // Always compute scaled delta; use for phase updates, and conditionally for time progression
-    let mut scaled = time.delta_secs() * sim_time.time_scale;
-    // Clamp to non-negative delta in case of odd time flow
-    scaled = scaled.max(0.0);
-
-    // Advance simulation clock: use primary (id 0) pause as the authority
-    let paused = cfgs.items[0].paused;
-    if !paused {
-        // Advance UTC using chrono::Duration (whole seconds + fractional nanoseconds)
-        let whole = scaled.trunc() as i64;
-        let nanos = ((scaled - scaled.trunc()) * 1_000_000_000.0) as i64;
-        if whole != 0 {
-            sim_time.current_utc = sim_time.current_utc + Duration::seconds(whole);
+    let gmst = gmst_rad(sim_time.current_utc);
+    for entry in store.items.iter() {
+        if let (Some(tle), Some(constants)) = (&entry.tle, &entry.propagator) {
+            let mins = minutes_since_epoch(sim_time.current_utc, tle.epoch_utc);
+            // sgp4 2.3.0 expects MinutesSinceEpoch newtype and returns arrays
+            if let Ok(state) = constants.propagate(sgp4::MinutesSinceEpoch(mins)) {
+                let pos = state.position; // [f64; 3] in km (TEME)
+                let eci = DVec3::new(pos[0], pos[1], pos[2]);
+                let ecef = eci_to_ecef_km(eci, gmst);
+                let bevy_pos = Vec3::new(ecef.y as f32, ecef.z as f32, ecef.x as f32);
+                if let Some((mut t, mut c, _)) =
+                    q.iter_mut().find(|(_, _, e)| Some(*e) == entry.entity)
+                {
+                    t.translation = bevy_pos;
+                    c.0 = entry.color;
+                }
+            }
         }
-        if nanos != 0 {
-            sim_time.current_utc = sim_time.current_utc + Duration::nanoseconds(nanos);
-        }
-    }
-
-    for (mut t, id) in sat_query.iter_mut() {
-        let cfg = &mut cfgs.items[id.0 as usize];
-
-        // Orbital radius (km)
-        let r = EARTH_RADIUS_KM + cfg.altitude_km;
-
-        // Angular rate (rad/s)
-        let omega = TAU / (cfg.period_minutes.max(0.1) * 60.0);
-
-        // Advance phase (respect per-satellite pause)
-        if !cfg.paused {
-            cfg.theta_rad = (cfg.theta_rad + omega * scaled).rem_euclid(TAU);
-        }
-
-        // Position in orbital plane (x'z' plane around y'=0): start along +x', CCW toward +z'
-        let x_plane = r * cfg.theta_rad.cos();
-        let z_plane = r * cfg.theta_rad.sin();
-        let mut pos = Vec3::new(x_plane, 0.0, z_plane);
-
-        // Apply orientation: ECEF = Rz(Ω) * Rx(i) * pos_plane
-        let i_rad = cfg.inclination_deg.to_radians();
-        let raan_rad = cfg.raan_deg.to_radians();
-        pos = rot_x(pos, i_rad);
-        pos = rot_z(pos, raan_rad);
-
-        // Write transform
-        t.translation = pos;
     }
 }
 
-
+// Setup scene, cameras, and TLE worker
 pub fn setup(
     mut commands: Commands,
     mut egui_global_settings: ResMut<EguiGlobalSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    // asset_server: Res<AssetServer>,
 ) {
-    // Disable the automatic creation of a primary context to set it up manually for the camera we need.
     egui_global_settings.auto_create_primary_context = false;
 
-    // Satellite mesh reused
-    let sat_mesh = meshes.add(Sphere::new(500.0).mesh().ico(5).unwrap());
+    // Start TLE worker
+    let channels = start_tle_worker();
+    println!("[INIT] TLE worker started");
+    commands.insert_resource(channels);
 
-    // Spawn three satellites with distinct colors and IDs
-    let red = Color::srgb(1., 0., 0.);
-    let green = Color::srgb(0., 1., 0.);
-    let blue = Color::srgb(0., 0., 1.);
-
-    commands.spawn((
-        Mesh3d(sat_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: red,
-            emissive: red.to_linear(),
-            ..Default::default()
-        })),
-        Satellite,
-        SatelliteId(0),
-        SatelliteColor(red),
-        Transform::from_xyz(25000.0, 0., 0.),
-    ));
-    commands.spawn((
-        Mesh3d(sat_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: green,
-            emissive: green.to_linear(),
-            ..Default::default()
-        })),
-        Satellite,
-        SatelliteId(1),
-        SatelliteColor(green),
-        Transform::from_xyz(25000.0, 0., 0.),
-    ));
-    commands.spawn((
-        Mesh3d(sat_mesh),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: blue,
-            emissive: blue.to_linear(),
-            ..Default::default()
-        })),
-        Satellite,
-        SatelliteId(2),
-        SatelliteColor(blue),
-        Transform::from_xyz(25000.0, 0., 0.),
-    ));
-
-    // Axes marker (unchanged)
+    // Axes marker
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().ico(5).unwrap())),
         MeshMaterial3d(materials.add(Color::srgb(1.0, 0., 0.))),
         ShowAxes,
     ));
-    commands.spawn((
-        PanOrbitCamera::default(),
-        Transform::from_xyz(25000.0, 8.0, 4.0),
-    ));
+    commands.spawn((PanOrbitCamera::default(), Transform::from_xyz(25000.0, 8.0, 4.0)));
     commands.spawn((
         Camera2d,
         PrimaryEguiContext,
         RenderLayers::none(),
-        Camera {
-            order: 1,
-            ..default()
-        },
+        Camera { order: 1, ..default() },
         Transform::from_xyz(25000.0, 8.0, 4.0),
     ));
 }
 
-// This function runs every frame. Therefore, updating the viewport after drawing the gui.
-// With a resource which stores the dimensions of the panels, the update of the Viewport can
-// be done in another system.
+// UI
 fn ui_example_system(
     mut contexts: EguiContexts,
     mut camera: Single<&mut Camera, Without<EguiContext>>,
@@ -474,6 +495,12 @@ fn ui_example_system(
     mut state: ResMut<UIState>,
     mut arrows_cfg: ResMut<ArrowConfig>,
     mut sim_time: ResMut<SimulationTime>,
+    mut store: ResMut<SatelliteStore>,
+    mut right_ui: ResMut<RightPanelUI>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    fetch_channels: Option<Res<FetchChannels>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut left = egui::SidePanel::left("left_panel")
@@ -507,43 +534,131 @@ fn ui_example_system(
             ui.collapsing("Gradient settings", |ui| {
                 ui.label("Distance range (km)");
                 ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Slider::new(&mut arrows_cfg.gradient_near_km, 10.0..=200000.0)
-                            .text("Near km"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut arrows_cfg.gradient_far_km, 10.0..=200000.0)
-                            .text("Far km"),
-                    );
+                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_near_km, 10.0..=200000.0).text("Near km"));
+                    ui.add(egui::Slider::new(&mut arrows_cfg.gradient_far_km, 10.0..=200000.0).text("Far km"));
                 });
                 ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
             });
         })
         .response
         .rect
-        .width(); // height is ignored, as the panel has a hight of 100% of the screen
+        .width();
 
     let mut right = egui::SidePanel::right("right_panel")
         .resizable(true)
         .show(ctx, |ui| {
-            ui.label("Right resizeable panel");
+            ui.heading("Satellites");
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("NORAD:");
+                let edit = ui.text_edit_singleline(&mut right_ui.input);
+                let add_btn = ui.button("Add").clicked();
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if add_btn || enter {
+                    match right_ui.input.trim().parse::<u32>() {
+                        Ok(norad) => {
+                            right_ui.error = None;
+                            if !store.items.iter().any(|s| s.norad == norad) {
+                                // randomized bright color for satellite marker (deterministic by NORAD)
+                                // simple LCG to spread hues without external RNG dependency
+                                let seed = (norad as u32)
+                                    .wrapping_mul(1664525)
+                                    .wrapping_add(1013904223);
+                                let hue = (seed as f32 / u32::MAX as f32).fract(); // [0,1)
+                                let sat = (0.65 + ((norad % 7) as f32) * 0.035).clamp(0.6, 0.9);
+                                let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
+                                let color = Color::hsl(hue, sat, light);
+
+                                // spawn entity placeholder
+                                let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
+                                let entity = commands
+                                    .spawn((
+                                        Mesh3d(meshes.add(mesh)),
+                                        MeshMaterial3d(materials.add(StandardMaterial {
+                                            base_color: color,
+                                            emissive: color.to_linear(),
+                                            ..Default::default()
+                                        })),
+                                        Satellite,
+                                        SatelliteColor(color),
+                                        Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
+                                    ))
+                                    .id();
+                                store.items.push(SatEntry {
+                                    norad,
+                                    name: None,
+                                    color,
+                                    entity: Some(entity),
+                                    tle: None,
+                                    propagator: None,
+                                    error: None,
+                                });
+                                // Immediately send fetch request to background worker via injected resource
+                                if let Some(fetch) = &fetch_channels {
+                                    println!("[REQUEST] sending fetch for norad={}", norad);
+                                    if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
+                                        eprintln!("[REQUEST] failed to send fetch for norad={}: {}", norad, e);
+                                    }
+                                } else {
+                                    eprintln!("[REQUEST] FetchChannels not available; cannot fetch norad={}", norad);
+                                }
+                                // clear input
+                                right_ui.input.clear();
+                            }
+                        }
+                        Err(_) => right_ui.error = Some("Invalid NORAD ID".to_string()),
+                    }
+                }
+            });
+            if let Some(err) = &right_ui.error {
+                ui.colored_label(Color32::RED, err);
+            }
+            ui.separator();
+            // list with basic status
+            for idx in 0..store.items.len() {
+                let mut remove = false;
+                ui.horizontal(|ui| {
+                    let s = &store.items[idx];
+                    let status = if let Some(err) = &s.error {
+                        format!("Error: {}", err)
+                    } else if s.propagator.is_some() {
+                        "Ready".to_string()
+                    } else if s.tle.is_some() {
+                        "TLE".to_string()
+                    } else {
+                        "Fetching...".to_string()
+                    };
+                    ui.label(format!(
+                        "#{:>6}  {:<20} [{}]",
+                        s.norad,
+                        s.name.as_deref().unwrap_or("Unnamed"),
+                        status
+                    ));
+                    if ui.button("Remove").clicked() {
+                        remove = true;
+                    }
+                });
+                if remove {
+                    if let Some(entity) = store.items[idx].entity.take() {
+                        // Bevy 0.16: despawn() recursively by default
+                        commands.entity(entity).despawn();
+                    }
+                    store.items.remove(idx);
+                    break;
+                }
+            }
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
         })
         .response
         .rect
-        .width(); // height is ignored, as the panel has a height of 100% of the screen
+        .width();
 
     let mut top = egui::TopBottomPanel::top("top_panel")
         .resizable(true)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.strong("UTC:");
-                // Show ISO 8601 Z time
-                ui.monospace(
-                    sim_time
-                        .current_utc
-                        .to_rfc3339_opts(SecondsFormat::Secs, true),
-                );
+                ui.monospace(sim_time.current_utc.to_rfc3339_opts(SecondsFormat::Secs, true));
                 if (sim_time.time_scale - 1.0).abs() > 1e-6 {
                     ui.separator();
                     ui.label(format!("{:.2}x", sim_time.time_scale));
@@ -555,7 +670,8 @@ fn ui_example_system(
         })
         .response
         .rect
-        .height(); // width is ignored, as the panel has a width of 100% of the screen
+        .height();
+
     let mut bottom = egui::TopBottomPanel::bottom("bottom_panel")
         .resizable(true)
         .show(ctx, |ui| {
@@ -564,40 +680,13 @@ fn ui_example_system(
         })
         .response
         .rect
-        .height(); // width is ignored, as the panel has a width of 100% of the screen
+        .height();
 
     // Scale from logical units to physical units.
     left *= window.scale_factor();
     right *= window.scale_factor();
     top *= window.scale_factor();
     bottom *= window.scale_factor();
-
-    // -------------------------------------------------
-    // |  left   |            top   ^^^^^^   |  right  |
-    // |  panel  |           panel  height   |  panel  |
-    // |         |                  vvvvvv   |         |
-    // |         |---------------------------|         |
-    // |         |                           |         |
-    // |<-width->|          viewport         |<-width->|
-    // |         |                           |         |
-    // |         |---------------------------|         |
-    // |         |          bottom   ^^^^^^  |         |
-    // |         |          panel    height  |         |
-    // |         |                   vvvvvv  |         |
-    // -------------------------------------------------
-    //
-    // The upper left point of the viewport is the width of the left panel and the height of the
-    // top panel
-    //
-    // The width of the viewport the width of the top/bottom panel
-    // Alternative the width can be calculated as follow:
-    // size.x = window width - left panel width - right panel width
-    //
-    // The height of the viewport is:
-    // size.y = window height - top panel height - bottom panel height
-    //
-    // Therefore we use the alternative for the width, as we can callculate the Viewport as
-    // following:
 
     let pos = UVec2::new(left as u32, top as u32);
     let size = UVec2::new(window.physical_width(), window.physical_height())
@@ -613,29 +702,94 @@ fn ui_example_system(
     Ok(())
 }
 
+// Drain fetch results and build propagators
+fn process_fetch_results_system(
+    mut store: ResMut<SatelliteStore>,
+    fetch: Option<Res<FetchChannels>>,
+) {
+    let Some(fetch) = fetch else { return };
+    let Ok(guard) = fetch.res_rx.lock() else { return };
+    while let Ok(msg) = guard.try_recv() {
+        match msg {
+            FetchResultMsg::Success {
+                norad,
+                name,
+                line1,
+                line2,
+                epoch_utc,
+            } => {
+                println!("[TLE DISPATCH] received SUCCESS for norad={}", norad);
+                if let Some(s) = store.items.iter_mut().find(|s| s.norad == norad) {
+                    // clear previous error
+                    s.error = None;
+                    s.name = name.or_else(|| Some(format!("NORAD {}", norad)));
+                    let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
+                    s.tle = Some(TleData {
+                        name: s.name.clone(),
+                        line1: line1.clone(),
+                        line2: line2.clone(),
+                        epoch_utc: epoch,
+                    });
+                    // Build SGP4 model (sgp4 2.3.0): parse TLE -> Elements -> Constants
+                    match sgp4::Elements::from_tle(s.name.clone(), line1.as_bytes(), line2.as_bytes()) {
+                        Ok(elements) => match sgp4::Constants::from_elements(&elements) {
+                            Ok(constants) => {
+                                s.propagator = Some(constants);
+                                println!("[SGP4] norad={} constants initialized", norad);
+                            }
+                            Err(e) => {
+                                s.propagator = None;
+                                s.error = Some(e.to_string());
+                                eprintln!("[SGP4] norad={} constants error: {}", norad, s.error.as_deref().unwrap());
+                            }
+                        },
+                        Err(e) => {
+                            s.propagator = None;
+                            s.error = Some(e.to_string());
+                            eprintln!("[SGP4] norad={} elements error: {}", norad, s.error.as_deref().unwrap());
+                        }
+                    }
+                } else {
+                    eprintln!("[TLE DISPATCH] norad={} not found in store", norad);
+                }
+            }
+            FetchResultMsg::Failure { norad, error } => {
+                eprintln!("[TLE DISPATCH] received FAILURE for norad={}: {}", norad, error);
+                if let Some(s) = store.items.iter_mut().find(|s| s.norad == norad) {
+                    // keep existing name if any; record error and clear models
+                    s.error = Some(error);
+                    s.tle = None;
+                    s.propagator = None;
+                } else {
+                    eprintln!("[TLE DISPATCH] failure for unknown norad={} (not in store)", norad);
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     App::new()
         .init_resource::<UIState>()
         .init_resource::<ArrowConfig>()
         .init_resource::<SatEcef>()
         .init_resource::<SimulationTime>()
+        .init_resource::<SatelliteStore>()
+        .init_resource::<RightPanelUI>()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(MeshPickingPlugin)
-        .add_systems(
-            Startup,
-            (setup, generate_faces, spawn_city_population_spheres).chain(),
-        )
+        .add_systems(Startup, (setup, generate_faces, spawn_city_population_spheres).chain())
         .add_systems(
             Update,
             (
                 draw_axes.after(setup),
-                update_satellite_orbit, // write satellite transforms and advance sim time
-                // keep update_satellite_ecef for potential future use, but arrows don't depend on it
-                update_satellite_ecef.after(update_satellite_orbit),
-                // draw arrows after transforms are updated; no dependency on SatEcef anymore
-                draw_city_to_satellite_arrows.after(update_satellite_orbit),
+                advance_simulation_clock,               // advance UTC
+                process_fetch_results_system,           // receive TLEs/models
+                propagate_satellites_system.after(advance_simulation_clock), // update sat transforms
+                update_satellite_ecef.after(propagate_satellites_system),
+                draw_city_to_satellite_arrows.after(propagate_satellites_system),
             ),
         )
         .add_systems(EguiPrimaryContextPass, ui_example_system)
