@@ -10,6 +10,16 @@ bevy_dev_tools = "0.16.1"
 bevy_egui = "0.35.1"
 bevy_panorbit_camera = "0.27.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Async HTTP + TLS
+reqwest = { version = "0.12", default-features = false, features = ["http2", "charset", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Orbit propagation (2.x API)
+sgp4 = "2.3.0"
+# Utilities
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+anyhow = "1"
+glam = "0.27"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
