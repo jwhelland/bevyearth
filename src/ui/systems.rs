@@ -251,60 +251,82 @@ pub fn ui_example_system(
                 ui.colored_label(Color32::RED, err);
             }
             ui.separator();
-            // list with basic status
+            
+            // Clear All button
+            ui.horizontal(|ui| {
+                if ui.button("Clear All Satellites").clicked() {
+                    // Mark all satellites for removal
+                    for (_, entry) in store.items.iter_mut() {
+                        if let Some(entity) = entry.entity.take() {
+                            commands.entity(entity).despawn();
+                        }
+                    }
+                    store.items.clear();
+                }
+                ui.label(format!("({} satellites)", store.items.len()));
+            });
+            ui.separator();
+            
+            // Scrollable satellite list
             let mut to_remove: Option<u32> = None;
             let norad_keys: Vec<u32> = store.items.keys().copied().collect();
-            for norad in norad_keys {
-                // Use immutable access for display
-                if let Some(s) = store.items.get(&norad) {
-                    let mut remove = false;
-                    let mut show_footprint = s.show_footprint;
-                    ui.horizontal(|ui| {
-                        let status = if let Some(err) = &s.error {
-                            format!("Error: {}", err)
-                        } else if s.propagator.is_some() {
-                            "Ready".to_string()
-                        } else if s.tle.is_some() {
-                            "TLE".to_string()
-                        } else {
-                            "Fetching...".to_string()
-                        };
-                        ui.label(format!(
-                            "#{:>6}  {:<20} [{}]",
-                            s.norad,
-                            s.name.as_deref().unwrap_or("Unnamed"),
-                            status
-                        ));
-                
-                        // Add footprint checkbox if satellite is ready
-                        if s.propagator.is_some() {
-                            ui.checkbox(&mut show_footprint, "Coverage");
-                        }
-                
-                        if ui.button("Remove").clicked() {
-                            remove = true;
-                        }
-                    });
-                    // Update show_footprint if changed
-                    if s.propagator.is_some() {
-                        if show_footprint != s.show_footprint {
-                            if let Some(s_mut) = store.items.get_mut(&norad) {
-                                s_mut.show_footprint = show_footprint;
+            
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for norad in norad_keys {
+                        // Use immutable access for display
+                        if let Some(s) = store.items.get(&norad) {
+                            let mut remove = false;
+                            let mut show_footprint = s.show_footprint;
+                            ui.horizontal(|ui| {
+                                let status = if let Some(err) = &s.error {
+                                    format!("Error: {}", err)
+                                } else if s.propagator.is_some() {
+                                    "Ready".to_string()
+                                } else if s.tle.is_some() {
+                                    "TLE".to_string()
+                                } else {
+                                    "Fetching...".to_string()
+                                };
+                                ui.label(format!(
+                                    "#{:>6}  {:<20} [{}]",
+                                    s.norad,
+                                    s.name.as_deref().unwrap_or("Unnamed"),
+                                    status
+                                ));
+                        
+                                // Add footprint checkbox if satellite is ready
+                                if s.propagator.is_some() {
+                                    ui.checkbox(&mut show_footprint, "Coverage");
+                                }
+                        
+                                if ui.button("Remove").clicked() {
+                                    remove = true;
+                                }
+                            });
+                            // Update show_footprint if changed
+                            if s.propagator.is_some() {
+                                if show_footprint != s.show_footprint {
+                                    if let Some(s_mut) = store.items.get_mut(&norad) {
+                                        s_mut.show_footprint = show_footprint;
+                                    }
+                                }
+                            }
+                            if remove {
+                                if let Some(s_mut) = store.items.get_mut(&norad) {
+                                    if let Some(entity) = s_mut.entity.take() {
+                                        // Bevy 0.16: despawn() recursively by default
+                                        commands.entity(entity).despawn();
+                                    }
+                                }
+                                to_remove = Some(norad);
+                                break;
                             }
                         }
                     }
-                    if remove {
-                        if let Some(s_mut) = store.items.get_mut(&norad) {
-                            if let Some(entity) = s_mut.entity.take() {
-                                // Bevy 0.16: despawn() recursively by default
-                                commands.entity(entity).despawn();
-                            }
-                        }
-                        to_remove = Some(norad);
-                        break;
-                    }
-                }
-            }
+                });
+            
             if let Some(norad) = to_remove {
                 store.items.remove(&norad);
             }
