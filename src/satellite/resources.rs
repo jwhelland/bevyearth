@@ -1,14 +1,24 @@
 //! Satellite resources for managing satellite data
 
 use bevy::prelude::*;
+use std::collections::HashMap;
 use crate::coverage::CoverageParameters;
 use crate::tle::TleData;
 
 /// Resource for storing satellite data and state
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct SatelliteStore {
-    pub items: Vec<SatEntry>,
+    pub items: HashMap<u32, SatEntry>,
     pub next_color_hue: f32,
+}
+
+impl Default for SatelliteStore {
+    fn default() -> Self {
+        Self {
+            items: HashMap::new(),
+            next_color_hue: 0.0,
+        }
+    }
 }
 
 /// Individual satellite entry with all associated data

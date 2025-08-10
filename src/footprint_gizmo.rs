@@ -43,7 +43,7 @@ fn manage_footprint_gizmo_components_system(
         return;
     }
 
-    for entry in store.items.iter_mut() {
+    for entry in store.items.values_mut() {
         let should_show = entry.show_footprint && entry.propagator.is_some();
         
         if let Some(sat_entity) = entry.entity {

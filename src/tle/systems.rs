@@ -22,7 +22,7 @@ pub fn process_fetch_results_system(
                 epoch_utc,
             } => {
                 println!("[TLE DISPATCH] received SUCCESS for norad={}", norad);
-                if let Some(s) = store.items.iter_mut().find(|s| s.norad == norad) {
+                if let Some(s) = store.items.get_mut(&norad) {
                     // clear previous error
                     s.error = None;
                     s.name = name.or_else(|| Some(format!("NORAD {}", norad)));
@@ -58,7 +58,7 @@ pub fn process_fetch_results_system(
             }
             FetchResultMsg::Failure { norad, error } => {
                 eprintln!("[TLE DISPATCH] received FAILURE for norad={}: {}", norad, error);
-                if let Some(s) = store.items.iter_mut().find(|s| s.norad == norad) {
+                if let Some(s) = store.items.get_mut(&norad) {
                     // keep existing name if any; record error and clear models
                     s.error = Some(error);
                     s.tle = None;
