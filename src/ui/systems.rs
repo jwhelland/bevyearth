@@ -120,7 +120,7 @@ pub fn ui_example_system(
                     match right_ui.input.trim().parse::<u32>() {
                         Ok(norad) => {
                             right_ui.error = None;
-                            if !store.items.iter().any(|s| s.norad == norad) {
+                            if !store.items.contains_key(&norad) {
                                 // randomized bright color for satellite marker (deterministic by NORAD)
                                 // simple LCG to spread hues without external RNG dependency
                                 let seed = (norad as u32)
@@ -130,7 +130,7 @@ pub fn ui_example_system(
                                 let sat = (0.65 + ((norad % 7) as f32) * 0.035).clamp(0.6, 0.9);
                                 let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
                                 let color = Color::hsl(hue, sat, light);
-
+                            
                                 // spawn entity placeholder
                                 let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
                                 let entity = commands
@@ -146,7 +146,7 @@ pub fn ui_example_system(
                                         Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
                                     ))
                                     .id();
-                                store.items.push(SatEntry {
+                                store.items.insert(norad, SatEntry {
                                     norad,
                                     name: None,
                                     color,
@@ -179,43 +179,61 @@ pub fn ui_example_system(
             }
             ui.separator();
             // list with basic status
-            for idx in 0..store.items.len() {
-                let mut remove = false;
-                ui.horizontal(|ui| {
-                    let s = &store.items[idx];
-                    let status = if let Some(err) = &s.error {
-                        format!("Error: {}", err)
-                    } else if s.propagator.is_some() {
-                        "Ready".to_string()
-                    } else if s.tle.is_some() {
-                        "TLE".to_string()
-                    } else {
-                        "Fetching...".to_string()
-                    };
-                    ui.label(format!(
-                        "#{:>6}  {:<20} [{}]",
-                        s.norad,
-                        s.name.as_deref().unwrap_or("Unnamed"),
-                        status
-                    ));
-                    
-                    // Add footprint checkbox if satellite is ready
+            let mut to_remove: Option<u32> = None;
+            let norad_keys: Vec<u32> = store.items.keys().copied().collect();
+            for norad in norad_keys {
+                // Use immutable access for display
+                if let Some(s) = store.items.get(&norad) {
+                    let mut remove = false;
+                    let mut show_footprint = s.show_footprint;
+                    ui.horizontal(|ui| {
+                        let status = if let Some(err) = &s.error {
+                            format!("Error: {}", err)
+                        } else if s.propagator.is_some() {
+                            "Ready".to_string()
+                        } else if s.tle.is_some() {
+                            "TLE".to_string()
+                        } else {
+                            "Fetching...".to_string()
+                        };
+                        ui.label(format!(
+                            "#{:>6}  {:<20} [{}]",
+                            s.norad,
+                            s.name.as_deref().unwrap_or("Unnamed"),
+                            status
+                        ));
+                
+                        // Add footprint checkbox if satellite is ready
+                        if s.propagator.is_some() {
+                            ui.checkbox(&mut show_footprint, "Coverage");
+                        }
+                
+                        if ui.button("Remove").clicked() {
+                            remove = true;
+                        }
+                    });
+                    // Update show_footprint if changed
                     if s.propagator.is_some() {
-                        ui.checkbox(&mut store.items[idx].show_footprint, "Coverage");
+                        if show_footprint != s.show_footprint {
+                            if let Some(s_mut) = store.items.get_mut(&norad) {
+                                s_mut.show_footprint = show_footprint;
+                            }
+                        }
                     }
-                    
-                    if ui.button("Remove").clicked() {
-                        remove = true;
+                    if remove {
+                        if let Some(s_mut) = store.items.get_mut(&norad) {
+                            if let Some(entity) = s_mut.entity.take() {
+                                // Bevy 0.16: despawn() recursively by default
+                                commands.entity(entity).despawn();
+                            }
+                        }
+                        to_remove = Some(norad);
+                        break;
                     }
-                });
-                if remove {
-                    if let Some(entity) = store.items[idx].entity.take() {
-                        // Bevy 0.16: despawn() recursively by default
-                        commands.entity(entity).despawn();
-                    }
-                    store.items.remove(idx);
-                    break;
                 }
+            }
+            if let Some(norad) = to_remove {
+                store.items.remove(&norad);
             }
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
         })

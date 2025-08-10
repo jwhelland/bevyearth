@@ -23,7 +23,7 @@ pub fn propagate_satellites_system(
     mut q: Query<(&mut Transform, &mut SatelliteColor, Entity), With<Satellite>>,
 ) {
     let gmst = gmst_rad(sim_time.current_utc);
-    for entry in store.items.iter() {
+    for entry in store.items.values() {
         if let (Some(tle), Some(constants)) = (&entry.tle, &entry.propagator) {
             let mins = minutes_since_epoch(sim_time.current_utc, tle.epoch_utc);
             // sgp4 2.3.0 expects MinutesSinceEpoch newtype and returns arrays
