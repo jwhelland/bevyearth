@@ -19,4 +19,6 @@ impl Default for UIState {
 pub struct RightPanelUI {
     pub input: String,
     pub error: Option<String>,
+    pub selected_group: Option<String>,
+    pub group_loading: bool,
 }

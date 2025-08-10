@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 
+pub mod groups;
 pub mod panels;
 pub mod state;
 pub mod systems;

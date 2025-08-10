@@ -5,6 +5,7 @@ use bevy::math::DVec3;
 use crate::satellite::components::{Satellite, SatelliteColor};
 use crate::satellite::resources::{SatelliteStore, SatEcef};
 use crate::orbital::{SimulationTime, gmst_rad, eci_to_ecef_km, minutes_since_epoch};
+use crate::earth::EARTH_RADIUS_KM;
 
 /// System to update the satellite ECEF resource from satellite transforms
 pub fn update_satellite_ecef(
@@ -39,6 +40,45 @@ pub fn propagate_satellites_system(
                     c.0 = entry.color;
                 }
             }
+        }
+    }
+}
+
+/// System to spawn entities for satellites that don't have them yet (e.g., from group loading)
+pub fn spawn_missing_satellite_entities_system(
+    mut store: ResMut<SatelliteStore>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mut satellites_to_spawn = Vec::new();
+    
+    // Collect satellites that need entities
+    for (norad, entry) in store.items.iter() {
+        if entry.entity.is_none() && entry.tle.is_some() {
+            satellites_to_spawn.push(*norad);
+        }
+    }
+    
+    // Spawn entities for satellites that need them
+    for norad in satellites_to_spawn {
+        if let Some(entry) = store.items.get_mut(&norad) {
+            let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
+            let entity = commands
+                .spawn((
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: entry.color,
+                        emissive: entry.color.to_linear(),
+                        ..Default::default()
+                    })),
+                    Satellite,
+                    SatelliteColor(entry.color),
+                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
+                ))
+                .id();
+            entry.entity = Some(entity);
+            println!("[SPAWN] Created entity for satellite norad={}", norad);
         }
     }
 }

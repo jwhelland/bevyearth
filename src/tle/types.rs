@@ -16,7 +16,10 @@ pub struct TleData {
 /// Commands for the TLE fetcher worker thread
 #[derive(Debug)]
 pub enum FetchCommand {
+    /// Fetch a single satellite by NORAD ID
     Fetch(u32),
+    /// Fetch all satellites in a Celestrak group (e.g., "weather")
+    FetchGroup { group: String },
 }
 
 /// Results from the TLE fetcher worker thread
