@@ -1,10 +1,19 @@
 //! Satellite coverage footprint calculations
-//! 
+//!
 //! This module provides frequency-dependent path loss calculations and coverage
 //! radius determination for satellite footprint visualization.
 
 use bevy::prelude::*;
 use std::f32::consts::PI;
+
+/// Plugin for coverage calculations and footprint configuration
+pub struct CoveragePlugin;
+
+impl Plugin for CoveragePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FootprintConfig>();
+    }
+}
 
 /// Coverage parameters for satellite footprint calculations
 #[derive(Debug, Clone)]

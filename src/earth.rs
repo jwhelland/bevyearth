@@ -7,6 +7,15 @@ use crate::coord::Coordinates;
 
 pub const EARTH_RADIUS_KM: f32 = 6371.0;
 
+/// Plugin for Earth rendering and mesh generation
+pub struct EarthPlugin;
+
+impl Plugin for EarthPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, generate_faces);
+    }
+}
+
 pub fn generate_face(
     normal: Vec3,
     resolution: u32,
