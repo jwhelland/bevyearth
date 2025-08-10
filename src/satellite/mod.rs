@@ -11,7 +11,7 @@ pub mod systems;
 
 pub use components::{Satellite, SatelliteColor};
 pub use resources::{SatelliteStore, SatEntry, SatEcef};
-pub use systems::{propagate_satellites_system, update_satellite_ecef};
+pub use systems::{propagate_satellites_system, update_satellite_ecef, spawn_missing_satellite_entities_system};
 
 /// Plugin for satellite management and propagation
 pub struct SatellitePlugin;
@@ -23,7 +23,8 @@ impl Plugin for SatellitePlugin {
             .add_systems(
                 Update,
                 (
-                    propagate_satellites_system,
+                    spawn_missing_satellite_entities_system,
+                    propagate_satellites_system.after(spawn_missing_satellite_entities_system),
                     update_satellite_ecef.after(propagate_satellites_system),
                 ),
             );

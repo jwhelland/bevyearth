@@ -5,6 +5,7 @@ use crate::tle::parser::parse_tle_epoch_to_utc;
 use chrono::Utc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use sgp4;
 
 /// Start the background TLE worker thread
 pub fn start_tle_worker() -> FetchChannels {
@@ -92,6 +93,78 @@ pub fn start_tle_worker() -> FetchChannels {
                                 eprintln!("[TLE RESULT] norad={} FAILURE: {}", norad, e);
                                 send(FetchResultMsg::Failure { norad, error: e.to_string() })
                             }
+                        }
+                    }
+                    FetchCommand::FetchGroup { group } => {
+                        let url = format!(
+                            "https://celestrak.org/NORAD/elements/gp.php?GROUP={}&FORMAT=TLE",
+                            group
+                        );
+                        let send = |m| {
+                            let _ = res_tx.send(m);
+                        };
+                        let res = async {
+                            let resp = client
+                                .get(&url)
+                                .header("accept", "text/plain")
+                                .send()
+                                .await?;
+                            let status = resp.status();
+                            let body = resp.text().await?;
+                            println!("[TLE GROUP FETCH] group={} status={} url={} bytes={}...", group, status, url, body.len());
+                            if !status.is_success() {
+                                anyhow::bail!("HTTP {} for group fetch", status);
+                            }
+                            // Parse the body manually to extract TLE lines since sgp4::parse_3les returns Elements
+                            // which doesn't preserve the original TLE line format
+                            let mut lines: Vec<String> = Vec::new();
+                            for raw in body.lines() {
+                                let line = raw.trim_matches(|c| c == '\u{feff}' || c == '\r' || c == '\n' || c == ' ');
+                                if !line.is_empty() {
+                                    lines.push(line.to_string());
+                                }
+                            }
+                            
+                            let mut i = 0;
+                            while i < lines.len() {
+                                // Look for TLE line 1 (starts with '1')
+                                if i + 1 < lines.len() && lines[i].starts_with('1') && lines[i + 1].starts_with('2') {
+                                    let line1 = &lines[i];
+                                    let line2 = &lines[i + 1];
+                                    
+                                    // Extract NORAD ID from line1 (columns 3-7, 0-based)
+                                    let norad = line1.get(2..7)
+                                        .and_then(|s| s.trim().parse::<u32>().ok())
+                                        .unwrap_or(0);
+                                    
+                                    // Look for name line before TLE (if exists and is not a TLE line)
+                                    let name = if i > 0 && !lines[i-1].starts_with('1') && !lines[i-1].starts_with('2') {
+                                        Some(lines[i-1].clone())
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    let epoch_utc = parse_tle_epoch_to_utc(line1).unwrap_or_else(|| Utc::now());
+                                    println!("[TLE GROUP PARSED] norad={} name={:?}", norad, name);
+                                    send(FetchResultMsg::Success {
+                                        norad,
+                                        name,
+                                        line1: line1.clone(),
+                                        line2: line2.clone(),
+                                        epoch_utc
+                                    });
+                                    
+                                    i += 2; // Skip both TLE lines
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }
+                        .await;
+                        if let Err(e) = res {
+                            eprintln!("[TLE GROUP RESULT] group={} FAILURE: {}", group, e);
+                            // Optionally, could send a failure for each norad, but here just log
                         }
                     }
                 }

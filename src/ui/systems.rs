@@ -8,6 +8,7 @@ use bevy_egui::egui::Color32;
 use chrono::SecondsFormat;
 
 use crate::ui::state::{UIState, RightPanelUI};
+use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry};
 use crate::orbital::SimulationTime;
 use crate::tle::{FetchChannels, FetchCommand};
@@ -111,6 +112,78 @@ pub fn ui_example_system(
         .show(ctx, |ui| {
             ui.heading("Satellites");
             ui.separator();
+            
+            // Satellite Groups Section
+            ui.heading("Satellite Groups");
+            ui.separator();
+            
+            // Group selection dropdown
+            egui::ComboBox::from_label("Select Group")
+                .selected_text(
+                    right_ui.selected_group
+                        .as_ref()
+                        .map(|g| get_group_display_name(g))
+                        .unwrap_or("Choose a group...")
+                )
+                .show_ui(ui, |ui| {
+                    for (group_key, group_name) in SATELLITE_GROUPS {
+                        ui.selectable_value(&mut right_ui.selected_group, Some(group_key.to_string()), *group_name);
+                    }
+                });
+            
+            let mut load_group_request = None;
+            let mut set_error = None;
+            let mut set_loading = None;
+            
+            ui.horizontal(|ui| {
+                let load_btn = ui.button("Load Group").clicked();
+                if right_ui.group_loading {
+                    ui.spinner();
+                    ui.label("Loading...");
+                }
+                
+                if load_btn && !right_ui.group_loading {
+                    if let Some(group) = &right_ui.selected_group {
+                        load_group_request = Some(group.clone());
+                        set_loading = Some(true);
+                        set_error = Some(None);
+                    } else {
+                        set_error = Some(Some("Please select a group first".to_string()));
+                    }
+                }
+            });
+            
+            // Handle the group loading request outside the closure
+            if let Some(group) = load_group_request {
+                right_ui.group_loading = true;
+                right_ui.error = None;
+                
+                // Send group fetch command
+                if let Some(fetch) = &fetch_channels {
+                    println!("[REQUEST] sending group fetch for group={}", group);
+                    if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
+                        eprintln!("[REQUEST] failed to send group fetch: {}", e);
+                        right_ui.error = Some(format!("Failed to request group: {}", e));
+                        right_ui.group_loading = false;
+                    }
+                } else {
+                    eprintln!("[REQUEST] FetchChannels not available; cannot fetch group");
+                    right_ui.error = Some("Fetch service not available".to_string());
+                    right_ui.group_loading = false;
+                }
+            }
+            
+            // Apply any error state changes
+            if let Some(error) = set_error {
+                right_ui.error = error;
+            }
+            
+            ui.separator();
+            
+            // Individual Satellite Section
+            ui.heading("Individual Satellites");
+            ui.separator();
+            
             ui.horizontal(|ui| {
                 ui.label("NORAD:");
                 let edit = ui.text_edit_singleline(&mut right_ui.input);
