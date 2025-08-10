@@ -1,13 +1,67 @@
 //! Footprint gizmo rendering for satellite coverage visualization
-//! 
+//!
 //! This module provides simple, highly visible circle rendering using Bevy gizmos
 //! instead of complex meshes for better visibility on Earth's surface.
 
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-use crate::coverage::{CoverageParameters, FootprintCalculator};
+use crate::coverage::{CoverageParameters, FootprintCalculator, FootprintConfig};
 use crate::earth::EARTH_RADIUS_KM;
+use crate::satellite::{Satellite, SatelliteStore};
+
+/// Plugin for footprint gizmo rendering and management
+pub struct FootprintGizmoPlugin;
+
+impl Plugin for FootprintGizmoPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FootprintGizmoConfig>()
+            .add_systems(
+                Update,
+                (
+                    manage_footprint_gizmo_components_system,
+                    draw_footprint_gizmos_system.after(manage_footprint_gizmo_components_system),
+                ),
+            );
+    }
+}
+
+/// System to manage footprint gizmo components (add/remove based on settings)
+fn manage_footprint_gizmo_components_system(
+    mut commands: Commands,
+    mut store: ResMut<SatelliteStore>,
+    footprint_config: Res<FootprintConfig>,
+    gizmo_config: Res<FootprintGizmoConfig>,
+    satellite_query: Query<Entity, With<Satellite>>,
+    gizmo_query: Query<Entity, With<FootprintGizmo>>,
+) {
+    if !footprint_config.enabled || !gizmo_config.enabled {
+        // If footprints are globally disabled, remove all FootprintGizmo components
+        for gizmo_entity in gizmo_query.iter() {
+            commands.entity(gizmo_entity).remove::<FootprintGizmo>();
+        }
+        return;
+    }
+
+    for entry in store.items.iter_mut() {
+        let should_show = entry.show_footprint && entry.propagator.is_some();
+        
+        if let Some(sat_entity) = entry.entity {
+            if let Ok(entity) = satellite_query.get(sat_entity) {
+                let has_gizmo_component = gizmo_query.get(entity).is_ok();
+                
+                if should_show && !has_gizmo_component {
+                    // Add FootprintGizmo component (parameters will be read dynamically from UI)
+                    let dummy_params = CoverageParameters::default();
+                    commands.entity(entity).insert(FootprintGizmo::new(entry.norad, dummy_params));
+                } else if !should_show && has_gizmo_component {
+                    // Remove FootprintGizmo component
+                    commands.entity(entity).remove::<FootprintGizmo>();
+                }
+            }
+        }
+    }
+}
 
 /// Component marker for satellites that should show footprint gizmos
 #[derive(Component)]
@@ -76,7 +130,7 @@ pub fn draw_footprint_gizmos_system(
     mut gizmos: Gizmos,
     config: Res<FootprintGizmoConfig>,
     footprint_config: Res<crate::coverage::FootprintConfig>,
-    satellite_query: Query<(&Transform, &FootprintGizmo), With<crate::Satellite>>,
+    satellite_query: Query<(&Transform, &FootprintGizmo), With<Satellite>>,
 ) {
     if !config.enabled || !footprint_config.enabled {
         return;

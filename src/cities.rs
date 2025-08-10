@@ -5,6 +5,30 @@ use bevy::render::mesh::SphereMeshBuilder;
 
 use crate::earth::EARTH_RADIUS_KM;
 
+/// Plugin for city visualization and management
+pub struct CitiesPlugin;
+
+impl Plugin for CitiesPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, (initialize_cities_ecef, spawn_city_population_spheres).chain());
+    }
+}
+
+/// Initialize the CitiesEcef resource with actual city data
+fn initialize_cities_ecef(mut commands: Commands) {
+    let major_cities = major_cities_data();
+    let mut cache = Vec::with_capacity(major_cities.len());
+    
+    for (_name, latitude, longitude, _population) in &major_cities {
+        let ecef = Coordinates::from_degrees(*latitude, *longitude)
+            .unwrap()
+            .get_point_on_sphere(); // already returns EARTH_RADIUS_KM scaled Vec3
+        cache.push(ecef);
+    }
+    
+    commands.insert_resource(CitiesEcef(cache));
+}
+
 // Define constants for scaling the spheres
 const BASE_RADIUS: f32 = 15.0; // Minimum radius for smallest city
 const SCALE_FACTOR: f32 = 0.8; // Multiplier for population to radius conversion
@@ -12,7 +36,7 @@ const MIN_POPULATION: f32 = 5.0; // For normalization purposes
 const MAX_POPULATION: f32 = 40.0; // For normalization purposes
 
 // CPU cache of city locations in ECEF kilometers
-#[derive(Resource, Deref, DerefMut)]
+#[derive(Resource, Deref, DerefMut, Default)]
 pub struct CitiesEcef(pub Vec<Vec3>);
 
 // Create a component to store city information.
@@ -71,23 +95,13 @@ pub fn major_cities_data() -> Vec<(String, f32, f32, f32)> {
     ]
 }
 
-// Startup system: cache ECEF positions and also spawn spheres
+// Startup system: spawn city visual markers
 pub fn spawn_city_population_spheres(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let major_cities = major_cities_data();
-
-    // Build ECEF cache (km)
-    let mut cache = Vec::with_capacity(major_cities.len());
-    for (_name, latitude, longitude, _population) in &major_cities {
-        let ecef = Coordinates::from_degrees(*latitude, *longitude)
-            .unwrap()
-            .get_point_on_sphere(); // already returns EARTH_RADIUS_KM scaled Vec3
-        cache.push(ecef);
-    }
-    commands.insert_resource(CitiesEcef(cache));
 
     // Visual markers
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Ico { subdivisions: 32 });
