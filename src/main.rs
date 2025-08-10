@@ -17,12 +17,30 @@ use std::sync::{Arc, Mutex};
 
 mod cities;
 mod coord;
+mod coverage;
 mod earth;
+// mod footprint_mesh;
+mod footprint_gizmo;
 use crate::earth::EARTH_RADIUS_KM;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use cities::{spawn_city_population_spheres, CitiesEcef};
 use coord::{hemisphere_prefilter, los_visible_ecef};
+use coverage::{CoverageParameters, FootprintConfig};
 use earth::generate_faces;
+// use footprint_mesh::{FootprintMarker, FootprintMeshUtils};
+use footprint_gizmo::{FootprintGizmo, FootprintGizmoConfig, draw_footprint_gizmos_system};
+
+// Helper function to create footprint material
+// fn create_footprint_material() -> StandardMaterial {
+//     StandardMaterial {
+//         base_color: Color::srgba(0.0, 1.0, 0.0, 0.8), // More opaque green
+//         alpha_mode: AlphaMode::Blend,
+//         unlit: true, // Don't apply lighting to footprints
+//         cull_mode: None, // Render both sides
+//         double_sided: true, // Ensure visibility from both sides
+//         ..default()
+//     }
+// }
 
 // UI/state for dynamic satellites
 #[derive(Component)]
@@ -48,6 +66,10 @@ struct SatEntry {
     propagator: Option<sgp4::Constants>,
     // last error (if any)
     error: Option<String>,
+    // coverage footprint parameters
+    coverage_params: Option<CoverageParameters>,
+    // whether to show footprint for this satellite
+    show_footprint: bool,
 }
 
 #[derive(Resource, Default)]
@@ -457,6 +479,167 @@ fn propagate_satellites_system(
     }
 }
 
+// System to manage footprint entities (spawn/despawn based on settings)
+// fn manage_footprint_entities_system(
+//     mut commands: Commands,
+//     mut store: ResMut<SatelliteStore>,
+//     mut meshes: ResMut<Assets<Mesh>>,
+//     mut materials: ResMut<Assets<StandardMaterial>>,
+//     footprint_config: Res<FootprintConfig>,
+//     satellite_query: Query<&Transform, With<Satellite>>,
+// ) {
+//     if !footprint_config.enabled {
+//         // If footprints are globally disabled, despawn all footprint entities
+//         for entry in store.items.iter_mut() {
+//             if let Some(footprint_entity) = entry.footprint_entity.take() {
+//                 commands.entity(footprint_entity).despawn();
+//             }
+//         }
+//         return;
+//     }
+
+//     for entry in store.items.iter_mut() {
+//         let should_show = entry.show_footprint && entry.propagator.is_some();
+//         let has_entity = entry.footprint_entity.is_some();
+
+//         if should_show && !has_entity {
+//             // Need to spawn footprint entity
+//             if let Some(sat_entity) = entry.entity {
+//                 if let Ok(sat_transform) = satellite_query.get(sat_entity) {
+//                     // Use current UI parameters instead of caching them
+//                     let current_params = CoverageParameters {
+//                         frequency_mhz: footprint_config.default_frequency_mhz,
+//                         transmit_power_dbm: footprint_config.default_tx_power_dbm,
+//                         antenna_gain_dbi: footprint_config.default_antenna_gain_dbi,
+//                         min_signal_strength_dbm: footprint_config.default_min_signal_dbm,
+//                         min_elevation_deg: footprint_config.default_min_elevation_deg,
+//                     };
+
+//                     // Generate initial footprint mesh with current UI parameters
+//                     let footprint_mesh = FootprintMeshUtils::generate_satellite_footprint(
+//                         sat_transform.translation,
+//                         &current_params,
+//                         footprint_config.mesh_resolution,
+//                     );
+
+//                     // Spawn footprint entity
+//                     let footprint_entity = commands
+//                         .spawn((
+//                             Mesh3d(meshes.add(footprint_mesh)),
+//                             MeshMaterial3d(materials.add(create_footprint_material())),
+//                             Transform::from_translation(Vec3::ZERO),
+//                             FootprintMarker {
+//                                 satellite_norad: entry.norad,
+//                             },
+//                         ))
+//                         .id();
+
+//                     entry.footprint_entity = Some(footprint_entity);
+//                 }
+//             }
+//         } else if !should_show && has_entity {
+//             // Need to despawn footprint entity
+//             if let Some(footprint_entity) = entry.footprint_entity.take() {
+//                 commands.entity(footprint_entity).despawn();
+//             }
+//         }
+//     }
+// }
+
+// System to update footprint meshes when satellites move (rate limited)
+// fn update_footprint_meshes_system(
+//     store: Res<SatelliteStore>,
+//     footprint_config: Res<FootprintConfig>,
+//     satellite_query: Query<&Transform, With<Satellite>>,
+//     mut footprint_query: Query<&mut Mesh3d, With<FootprintMarker>>,
+//     mut meshes: ResMut<Assets<Mesh>>,
+//     time: Res<Time>,
+//     mut last_update: Local<f32>,
+// ) {
+//     if !footprint_config.enabled {
+//         return;
+//     }
+
+//     // Rate limit updates to avoid performance issues
+//     let update_interval = 1.0 / footprint_config.update_frequency_hz;
+//     *last_update += time.delta_secs();
+//     if *last_update < update_interval {
+//         return;
+//     }
+//     *last_update = 0.0;
+
+//     for entry in store.items.iter() {
+//         if let (Some(footprint_entity), Some(sat_entity)) =
+//             (entry.footprint_entity, entry.entity) {
+            
+//             if entry.show_footprint && entry.propagator.is_some() {
+//                 if let Ok(sat_transform) = satellite_query.get(sat_entity) {
+//                     // Use current UI parameters instead of cached ones
+//                     let current_params = CoverageParameters {
+//                         frequency_mhz: footprint_config.default_frequency_mhz,
+//                         transmit_power_dbm: footprint_config.default_tx_power_dbm,
+//                         antenna_gain_dbi: footprint_config.default_antenna_gain_dbi,
+//                         min_signal_strength_dbm: footprint_config.default_min_signal_dbm,
+//                         min_elevation_deg: footprint_config.default_min_elevation_deg,
+//                     };
+                    
+//                     // Check if footprint has visible coverage
+//                     if FootprintMeshUtils::has_visible_coverage(sat_transform.translation, &current_params) {
+//                         // Generate updated mesh with current UI parameters
+//                         let new_mesh = FootprintMeshUtils::generate_satellite_footprint(
+//                             sat_transform.translation,
+//                             &current_params,
+//                             footprint_config.mesh_resolution,
+//                         );
+
+//                         // Find and update the footprint mesh
+//                         if let Ok(mut mesh_handle) = footprint_query.get_mut(footprint_entity) {
+//                             *mesh_handle = Mesh3d(meshes.add(new_mesh));
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+
+// System to manage footprint gizmo components (add/remove based on settings)
+fn manage_footprint_gizmo_components_system(
+    mut commands: Commands,
+    mut store: ResMut<SatelliteStore>,
+    footprint_config: Res<FootprintConfig>,
+    gizmo_config: Res<FootprintGizmoConfig>,
+    satellite_query: Query<Entity, With<Satellite>>,
+    gizmo_query: Query<Entity, With<FootprintGizmo>>,
+) {
+    if !footprint_config.enabled || !gizmo_config.enabled {
+        // If footprints are globally disabled, remove all FootprintGizmo components
+        for gizmo_entity in gizmo_query.iter() {
+            commands.entity(gizmo_entity).remove::<FootprintGizmo>();
+        }
+        return;
+    }
+
+    for entry in store.items.iter_mut() {
+        let should_show = entry.show_footprint && entry.propagator.is_some();
+        
+        if let Some(sat_entity) = entry.entity {
+            if let Ok(entity) = satellite_query.get(sat_entity) {
+                let has_gizmo_component = gizmo_query.get(entity).is_ok();
+                
+                if should_show && !has_gizmo_component {
+                    // Add FootprintGizmo component (parameters will be read dynamically from UI)
+                    let dummy_params = CoverageParameters::default();
+                    commands.entity(entity).insert(FootprintGizmo::new(entry.norad, dummy_params));
+                } else if !should_show && has_gizmo_component {
+                    // Remove FootprintGizmo component
+                    commands.entity(entity).remove::<FootprintGizmo>();
+                }
+            }
+        }
+    }
+}
+
 // Setup scene, cameras, and TLE worker
 pub fn setup(
     mut commands: Commands,
@@ -494,6 +677,8 @@ fn ui_example_system(
     window: Single<&mut Window, With<PrimaryWindow>>,
     mut state: ResMut<UIState>,
     mut arrows_cfg: ResMut<ArrowConfig>,
+    mut footprint_cfg: ResMut<FootprintConfig>,
+    mut gizmo_cfg: ResMut<FootprintGizmoConfig>,
     mut sim_time: ResMut<SimulationTime>,
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
@@ -539,6 +724,39 @@ fn ui_example_system(
                 });
                 ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
             });
+
+            ui.separator();
+            ui.heading("Coverage Footprints");
+            ui.separator();
+            
+            ui.checkbox(&mut footprint_cfg.enabled, "Show footprints");
+            
+            ui.collapsing("Default Parameters", |ui| {
+                ui.add(egui::Slider::new(&mut footprint_cfg.default_frequency_mhz, 100.0..=30000.0)
+                    .text("Frequency (MHz)"));
+                ui.add(egui::Slider::new(&mut footprint_cfg.default_tx_power_dbm, 0.0..=50.0)
+                    .text("TX Power (dBm)"));
+                ui.add(egui::Slider::new(&mut footprint_cfg.default_antenna_gain_dbi, 0.0..=30.0)
+                    .text("Antenna Gain (dBi)"));
+                ui.add(egui::Slider::new(&mut footprint_cfg.default_min_signal_dbm, -150.0..=-50.0)
+                    .text("Min Signal (dBm)"));
+                ui.add(egui::Slider::new(&mut footprint_cfg.default_min_elevation_deg, 0.0..=45.0)
+                    .text("Min Elevation (°)"));
+            });
+            
+            ui.collapsing("Gizmo Settings", |ui| {
+                ui.checkbox(&mut gizmo_cfg.enabled, "Use gizmo circles (recommended)");
+                ui.add(egui::Slider::new(&mut gizmo_cfg.circle_segments, 16..=128)
+                    .text("Circle segments"));
+                ui.checkbox(&mut gizmo_cfg.show_signal_zones, "Show signal strength zones");
+                ui.checkbox(&mut gizmo_cfg.show_center_dot, "Show center dot");
+                if gizmo_cfg.show_center_dot {
+                    ui.add(egui::Slider::new(&mut gizmo_cfg.center_dot_size, 50.0..=500.0)
+                        .text("Center dot size (km)"));
+                }
+            });
+            
+
         })
         .response
         .rect
@@ -592,6 +810,8 @@ fn ui_example_system(
                                     tle: None,
                                     propagator: None,
                                     error: None,
+                                    coverage_params: None,
+                                    show_footprint: false,
                                 });
                                 // Immediately send fetch request to background worker via injected resource
                                 if let Some(fetch) = &fetch_channels {
@@ -634,6 +854,12 @@ fn ui_example_system(
                         s.name.as_deref().unwrap_or("Unnamed"),
                         status
                     ));
+                    
+                    // Add footprint checkbox if satellite is ready
+                    if s.propagator.is_some() {
+                        ui.checkbox(&mut store.items[idx].show_footprint, "Coverage");
+                    }
+                    
                     if ui.button("Remove").clicked() {
                         remove = true;
                     }
@@ -776,6 +1002,8 @@ fn main() {
         .init_resource::<SimulationTime>()
         .init_resource::<SatelliteStore>()
         .init_resource::<RightPanelUI>()
+        .init_resource::<FootprintConfig>()
+        .init_resource::<FootprintGizmoConfig>()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(PanOrbitCameraPlugin)
@@ -790,6 +1018,11 @@ fn main() {
                 propagate_satellites_system.after(advance_simulation_clock), // update sat transforms
                 update_satellite_ecef.after(propagate_satellites_system),
                 draw_city_to_satellite_arrows.after(propagate_satellites_system),
+                manage_footprint_gizmo_components_system.after(propagate_satellites_system), // manage footprint gizmo components
+                draw_footprint_gizmos_system.after(manage_footprint_gizmo_components_system), // draw footprint gizmos
+                // Disable old mesh systems for now
+                // manage_footprint_entities_system.after(propagate_satellites_system), // manage footprint entities
+                // update_footprint_meshes_system.after(manage_footprint_entities_system), // update footprint meshes
             ),
         )
         .add_systems(EguiPrimaryContextPass, ui_example_system)
