@@ -25,10 +25,10 @@ pub fn advance_simulation_clock(time: Res<Time>, mut sim_time: ResMut<Simulation
     let whole = scaled.trunc() as i64;
     let nanos = ((scaled - scaled.trunc()) * 1_000_000_000.0) as i64;
     if whole != 0 {
-        sim_time.current_utc = sim_time.current_utc + Duration::seconds(whole);
+        sim_time.current_utc += Duration::seconds(whole);
     }
     if nanos != 0 {
-        sim_time.current_utc = sim_time.current_utc + Duration::nanoseconds(nanos);
+        sim_time.current_utc += Duration::nanoseconds(nanos);
     }
 }
 

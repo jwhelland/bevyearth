@@ -10,7 +10,7 @@ pub mod axes;
 pub mod config;
 
 pub use config::ArrowConfig;
-pub use arrows::{draw_city_to_satellite_arrows, draw_arrow_segment};
+pub use arrows::draw_city_to_satellite_arrows;
 pub use axes::{draw_axes, ShowAxes};
 
 /// Plugin for visualization systems

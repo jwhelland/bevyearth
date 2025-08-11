@@ -3,7 +3,6 @@ use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;
 
-use crate::earth::EARTH_RADIUS_KM;
 
 /// Plugin for city visualization and management
 pub struct CitiesPlugin;
@@ -82,7 +81,7 @@ pub fn major_cities_data() -> Vec<(String, f32, f32, f32)> {
         (String::from("Chennai"), 13.0827, 80.2707, 10.0),
         (String::from("Lima"), -12.0464, -77.0428, 9.7),
         (String::from("Bangkok"), 13.7563, 100.5018, 9.6),
-        (String::from("Seoul"), 37.5665, 126.9780, 9.5),
+        (String::from("Seoul"), 37.5665, 126.978, 9.5),
         (String::from("Hyderabad"), 17.3850, 78.4867, 9.5),
         (String::from("Chengdu"), 30.5728, 104.0668, 9.3),
         (String::from("Singapore"), 1.3521, 103.8198, 5.7),
@@ -120,7 +119,7 @@ pub fn spawn_city_population_spheres(
         let color = Color::srgb(1.0, 1.0 - (t * 0.7), 0.5 - (t * 0.4));
 
         commands.spawn((
-            Mesh3d(meshes.add(sphere_mesh.clone())),
+            Mesh3d(meshes.add(sphere_mesh)),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
                 unlit: true,

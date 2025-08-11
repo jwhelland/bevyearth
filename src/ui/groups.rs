@@ -54,6 +54,7 @@ pub fn get_group_display_name(group: &str) -> &str {
 }
 
 /// Get all group keys
+#[allow(dead_code)]
 pub fn get_all_groups() -> Vec<&'static str> {
     SATELLITE_GROUPS.iter().map(|(key, _)| *key).collect()
 }

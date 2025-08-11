@@ -57,10 +57,7 @@ pub struct FootprintConfig {
     pub default_min_signal_dbm: f32,
     /// Default minimum elevation angle in degrees
     pub default_min_elevation_deg: f32,
-    /// Mesh resolution (number of radial segments)
-    pub mesh_resolution: u32,
-    /// Update frequency in Hz
-    pub update_frequency_hz: f32,
+
 }
 
 impl Default for FootprintConfig {
@@ -72,8 +69,6 @@ impl Default for FootprintConfig {
             default_antenna_gain_dbi: 20.0,
             default_min_signal_dbm: -120.0,  // -120 dBm minimum signal (more realistic threshold)
             default_min_elevation_deg: 10.0, // 10 degrees minimum elevation (practical limit)
-            mesh_resolution: 32,
-            update_frequency_hz: 2.0,
         }
     }
 }
@@ -183,7 +178,7 @@ impl FootprintCalculator {
         let cos_angle = (sat_radius * sat_radius + earth_radius_km * earth_radius_km - slant_range * slant_range) /
                        (2.0 * sat_radius * earth_radius_km);
         
-        let surface_radius = if cos_angle >= -1.0 && cos_angle <= 1.0 {
+        let surface_radius = if (-1.0..=1.0).contains(&cos_angle) {
             let angle = cos_angle.acos();
             earth_radius_km * angle
         } else {
@@ -197,11 +192,12 @@ impl FootprintCalculator {
     }
 
     /// Check if a ground point is within coverage of a satellite
+    #[allow(dead_code)]
     pub fn is_point_in_coverage(
         sat_pos_ecef_km: Vec3,
         ground_pos_ecef_km: Vec3,
         params: &CoverageParameters,
-        earth_radius_km: f32,
+        _earth_radius_km: f32,
     ) -> bool {
         let distance = sat_pos_ecef_km.distance(ground_pos_ecef_km);
         let signal_strength = Self::calculate_signal_strength_at_distance(distance, params);
@@ -224,6 +220,7 @@ impl FootprintCalculator {
     }
 
     /// Calculate signal strength at a specific ground point
+    #[allow(dead_code)]
     pub fn calculate_signal_strength_at_point(
         sat_pos_ecef_km: Vec3,
         ground_pos_ecef_km: Vec3,
@@ -453,8 +450,6 @@ mod tests {
         
         assert!(!config.enabled, "Footprint should be disabled by default");
         assert_eq!(config.default_frequency_mhz, 1575.0, "Default frequency should match CoverageParameters");
-        assert_eq!(config.mesh_resolution, 32, "Default mesh resolution should be 32");
-        assert_eq!(config.update_frequency_hz, 2.0, "Default update frequency should be 2 Hz");
     }
 
     #[test]

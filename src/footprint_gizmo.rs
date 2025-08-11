@@ -67,8 +67,10 @@ fn manage_footprint_gizmo_components_system(
 #[derive(Component)]
 pub struct FootprintGizmo {
     /// NORAD ID of the associated satellite
+    #[allow(dead_code)]
     pub satellite_norad: u32,
     /// Coverage parameters for this footprint
+    #[allow(dead_code)]
     pub coverage_params: CoverageParameters,
     /// Whether to show the footprint
     pub enabled: bool,
@@ -92,6 +94,7 @@ pub struct FootprintGizmoConfig {
     /// Number of segments for circle approximation
     pub circle_segments: u32,
     /// Line width for the footprint circle
+    #[allow(dead_code)]
     pub line_width: f32,
     /// Color for the footprint circle
     pub circle_color: Color,
@@ -237,7 +240,7 @@ fn draw_satellite_footprint_gizmo(
 fn draw_footprint_circle(
     gizmos: &mut Gizmos,
     center: Vec3,
-    up: Vec3,
+    _up: Vec3,
     right: Vec3,
     forward: Vec3,
     radius_km: f32,
@@ -324,10 +327,12 @@ fn project_to_sphere_surface(point: Vec3) -> Vec3 {
 }
 
 /// Utility functions for footprint gizmo management
+#[allow(dead_code)]
 pub struct FootprintGizmoUtils;
 
 impl FootprintGizmoUtils {
     /// Check if a satellite position would produce a visible footprint
+    #[allow(dead_code)]
     pub fn has_visible_coverage(
         sat_ecef_km: Vec3,
         coverage_params: &CoverageParameters,
@@ -342,6 +347,7 @@ impl FootprintGizmoUtils {
     }
 
     /// Calculate the footprint radius for a satellite
+    #[allow(dead_code)]
     pub fn calculate_footprint_radius(
         sat_ecef_km: Vec3,
         coverage_params: &CoverageParameters,

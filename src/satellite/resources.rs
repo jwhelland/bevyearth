@@ -34,6 +34,7 @@ pub struct SatEntry {
     /// Last error message if any
     pub error: Option<String>,
     /// Coverage footprint parameters
+    #[allow(dead_code)]
     pub coverage_params: Option<CoverageParameters>,
     /// Whether to show footprint for this satellite
     pub show_footprint: bool,
