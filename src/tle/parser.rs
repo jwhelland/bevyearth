@@ -29,8 +29,8 @@ pub fn parse_tle_epoch_to_utc(line1: &str) -> Option<DateTime<Utc>> {
     let nanos = ((frac_sec - (secs as f64)) * 1e9).round() as i64;
     let dt = date.and_hms_opt(0, 0, 0)?;
     let mut ndt = chrono::NaiveDateTime::new(date, dt.time());
-    ndt = ndt + chrono::Duration::seconds(secs);
-    ndt = ndt + chrono::Duration::nanoseconds(nanos);
+    ndt += chrono::Duration::seconds(secs);
+    ndt += chrono::Duration::nanoseconds(nanos);
     Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
 }
 

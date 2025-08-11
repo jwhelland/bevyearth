@@ -3,11 +3,10 @@
 use bevy::picking::prelude::*;
 use bevy::render::mesh::Mesh;
 use bevy::render::view::RenderLayers;
-use bevy::{prelude::*, render::camera::Viewport, window::PrimaryWindow};
+use bevy::prelude::*;
 
 use bevy_egui::{
-    egui, EguiContext, EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
-    PrimaryEguiContext,
+    EguiGlobalSettings, EguiPlugin, PrimaryEguiContext,
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 

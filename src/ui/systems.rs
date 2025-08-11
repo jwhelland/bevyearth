@@ -13,8 +13,8 @@ use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry};
 use crate::orbital::SimulationTime;
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::visualization::ArrowConfig;
-use crate::coverage::{CoverageParameters, FootprintConfig};
-use crate::footprint_gizmo::{FootprintGizmo, FootprintGizmoConfig};
+use crate::coverage::FootprintConfig;
+use crate::footprint_gizmo::FootprintGizmoConfig;
 use crate::earth::EARTH_RADIUS_KM;
 
 /// Main UI system that renders all the egui panels
@@ -196,7 +196,7 @@ pub fn ui_example_system(
                             if !store.items.contains_key(&norad) {
                                 // randomized bright color for satellite marker (deterministic by NORAD)
                                 // simple LCG to spread hues without external RNG dependency
-                                let seed = (norad as u32)
+                                let seed = norad
                                     .wrapping_mul(1664525)
                                     .wrapping_add(1013904223);
                                 let hue = (seed as f32 / u32::MAX as f32).fract(); // [0,1)
@@ -306,11 +306,9 @@ pub fn ui_example_system(
                                 }
                             });
                             // Update show_footprint if changed
-                            if s.propagator.is_some() {
-                                if show_footprint != s.show_footprint {
-                                    if let Some(s_mut) = store.items.get_mut(&norad) {
-                                        s_mut.show_footprint = show_footprint;
-                                    }
+                            if s.propagator.is_some() && show_footprint != s.show_footprint {
+                                if let Some(s_mut) = store.items.get_mut(&norad) {
+                                    s_mut.show_footprint = show_footprint;
                                 }
                             }
                             if remove {

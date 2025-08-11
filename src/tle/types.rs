@@ -7,8 +7,11 @@ use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}};
 /// TLE data structure
 #[derive(Clone)]
 pub struct TleData {
+    #[allow(dead_code)]
     pub name: Option<String>,
+    #[allow(dead_code)]
     pub line1: String,
+    #[allow(dead_code)]
     pub line2: String,
     pub epoch_utc: DateTime<Utc>,
 }

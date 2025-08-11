@@ -5,7 +5,6 @@ use crate::tle::parser::parse_tle_epoch_to_utc;
 use chrono::Utc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use sgp4;
 
 /// Start the background TLE worker thread
 pub fn start_tle_worker() -> FetchChannels {
@@ -37,12 +36,10 @@ pub fn start_tle_worker() -> FetchChannels {
                         let l1 = l;
                         let l2 = &lines[i + 1];
                         if l2.starts_with('2') {
-                            let sat_ok = l1.len() >= 7 && l2.len() >= 7 && &l1[2..7] == sat_fmt && &l2[2..7] == sat_fmt;
+                            let sat_ok = l1.len() >= 7 && l2.len() >= 7 && l1[2..7] == sat_fmt && l2[2..7] == sat_fmt;
                             if sat_ok {
                                 // Prefer a text name line immediately before l1 if it is not a TLE line
-                                let name = if let Some(p) = n {
-                                    if !p.starts_with('1') && !p.starts_with('2') { Some(p) } else { None }
-                                } else { None };
+                                let name = n.filter(|p| !p.starts_with('1') && !p.starts_with('2'));
                                 return Ok((name, l1.to_string(), l2.to_string()));
                             }
                         }
@@ -80,7 +77,7 @@ pub fn start_tle_worker() -> FetchChannels {
                             if !status.is_success() {
                                 anyhow::bail!("HTTP {} after parse", status);
                             }
-                            let epoch = parse_tle_epoch_to_utc(&l1).unwrap_or_else(|| Utc::now());
+                            let epoch = parse_tle_epoch_to_utc(&l1).unwrap_or_else(Utc::now);
                             Ok::<_, anyhow::Error>((name, l1, l2, epoch))
                         }
                         .await;
@@ -144,7 +141,7 @@ pub fn start_tle_worker() -> FetchChannels {
                                         None
                                     };
                                     
-                                    let epoch_utc = parse_tle_epoch_to_utc(line1).unwrap_or_else(|| Utc::now());
+                                    let epoch_utc = parse_tle_epoch_to_utc(line1).unwrap_or_else(Utc::now);
                                     println!("[TLE GROUP PARSED] norad={} name={:?}", norad, name);
                                     send(FetchResultMsg::Success {
                                         norad,

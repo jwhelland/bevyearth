@@ -9,9 +9,11 @@ pub struct ArrowConfig {
     pub color: Color,
     pub max_visible: usize,
     pub lift_m: f32,
+    #[allow(dead_code)]
     pub head_len_pct: f32,
     pub head_min_m: f32,
     pub head_max_m: f32,
+    #[allow(dead_code)]
     pub head_radius_pct: f32,
     pub shaft_len_pct: f32,
     pub shaft_min_m: f32,

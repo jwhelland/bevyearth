@@ -62,12 +62,9 @@ pub fn process_fetch_results_system(
                     store.next_color_hue = (store.next_color_hue + 137.5) % 360.0; // Golden angle for color diversity
                     let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
                     let name_val = name.clone().or_else(|| Some(format!("NORAD {}", norad)));
-                    let propagator = match sgp4::Elements::from_tle(name_val.clone(), line1.as_bytes(), line2.as_bytes())
+                    let propagator = sgp4::Elements::from_tle(name_val.clone(), line1.as_bytes(), line2.as_bytes())
                         .ok()
-                        .and_then(|elements| sgp4::Constants::from_elements(&elements).ok()) {
-                        Some(constants) => Some(constants),
-                        None => None,
-                    };
+                        .and_then(|elements| sgp4::Constants::from_elements(&elements).ok());
                     let entry = SatEntry {
                         norad,
                         name: name_val.clone(),
