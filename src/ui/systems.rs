@@ -9,7 +9,7 @@ use chrono::SecondsFormat;
 
 use crate::ui::state::{UIState, RightPanelUI};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
-use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry};
+use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry, OrbitTrailConfig};
 use crate::orbital::SimulationTime;
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::visualization::ArrowConfig;
@@ -26,6 +26,7 @@ pub fn ui_example_system(
     mut arrows_cfg: ResMut<ArrowConfig>,
     mut footprint_cfg: ResMut<FootprintConfig>,
     mut gizmo_cfg: ResMut<FootprintGizmoConfig>,
+    mut trail_cfg: ResMut<OrbitTrailConfig>,
     mut sim_time: ResMut<SimulationTime>,
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
@@ -102,6 +103,17 @@ pub fn ui_example_system(
                         .text("Center dot size (km)"));
                 }
             });
+
+            ui.separator();
+            ui.heading("Orbit Trails");
+            ui.separator();
+            
+            ui.add(egui::Slider::new(&mut trail_cfg.max_points, 10..=500)
+                .text("History points"));
+            ui.add(egui::Slider::new(&mut trail_cfg.max_age_seconds, 60.0..=1800.0)
+                .text("Max age (seconds)"));
+            ui.add(egui::Slider::new(&mut trail_cfg.update_interval_seconds, 0.5..=10.0)
+                .text("Update interval (seconds)"));
         })
         .response
         .rect
@@ -229,6 +241,7 @@ pub fn ui_example_system(
                                     error: None,
                                     coverage_params: None,
                                     show_footprint: false,
+                                    show_trail: false,
                                 });
                                 // Immediately send fetch request to background worker via injected resource
                                 if let Some(fetch) = &fetch_channels {
@@ -275,10 +288,15 @@ pub fn ui_example_system(
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     for norad in norad_keys {
-                        // Use immutable access for display
+                        // Use immutable access for display, collect changes to apply later
                         if let Some(s) = store.items.get(&norad) {
                             let mut remove = false;
                             let mut show_footprint = s.show_footprint;
+                            let mut show_trail = s.show_trail;
+                            let has_propagator = s.propagator.is_some();
+                            let old_footprint = s.show_footprint;
+                            let old_trail = s.show_trail;
+                            
                             ui.horizontal(|ui| {
                                 let status = if let Some(err) = &s.error {
                                     format!("Error: {}", err)
@@ -296,19 +314,30 @@ pub fn ui_example_system(
                                     status
                                 ));
                         
-                                // Add footprint checkbox if satellite is ready
-                                if s.propagator.is_some() {
+                                // Add checkboxes if satellite is ready
+                                if has_propagator {
                                     ui.checkbox(&mut show_footprint, "Coverage");
+                                    ui.checkbox(&mut show_trail, "Trail");
                                 }
                         
                                 if ui.button("Remove").clicked() {
                                     remove = true;
                                 }
                             });
+                            
+                            // Apply changes after releasing immutable borrow
+                            let _ = s;
+                            
                             // Update show_footprint if changed
-                            if s.propagator.is_some() && show_footprint != s.show_footprint {
+                            if has_propagator && show_footprint != old_footprint {
                                 if let Some(s_mut) = store.items.get_mut(&norad) {
                                     s_mut.show_footprint = show_footprint;
+                                }
+                            }
+                            // Update show_trail if changed
+                            if has_propagator && show_trail != old_trail {
+                                if let Some(s_mut) = store.items.get_mut(&norad) {
+                                    s_mut.show_trail = show_trail;
                                 }
                             }
                             if remove {

@@ -2,8 +2,8 @@
 
 use bevy::prelude::*;
 use bevy::math::DVec3;
-use crate::satellite::components::{Satellite, SatelliteColor};
-use crate::satellite::resources::{SatelliteStore, SatEcef};
+use crate::satellite::components::{Satellite, SatelliteColor, OrbitTrail, TrailPoint};
+use crate::satellite::resources::{SatelliteStore, SatEcef, OrbitTrailConfig};
 use crate::orbital::{SimulationTime, gmst_rad, eci_to_ecef_km, minutes_since_epoch};
 use crate::earth::EARTH_RADIUS_KM;
 
@@ -79,6 +79,111 @@ pub fn spawn_missing_satellite_entities_system(
                 .id();
             entry.entity = Some(entity);
             println!("[SPAWN] Created entity for satellite norad={}", norad);
+        }
+    }
+}
+
+/// System to update orbit trail history for satellites
+pub fn update_orbit_trails_system(
+    store: Res<SatelliteStore>,
+    sim_time: Res<SimulationTime>,
+    trail_config: Res<OrbitTrailConfig>,
+    mut trail_query: Query<(&mut OrbitTrail, &Transform, Entity), With<Satellite>>,
+    mut commands: Commands,
+) {
+    let current_time = sim_time.current_utc;
+    
+    for (mut trail, transform, entity) in trail_query.iter_mut() {
+        // Find the satellite entry for this entity
+        if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
+            // Only update trail if it's enabled for this satellite
+            if !entry.show_trail {
+                // Clear trail if disabled
+                trail.history.clear();
+                continue;
+            }
+            
+            // Check if enough time has passed to add a new trail point
+            let should_add_point = trail.history.is_empty() || 
+                trail.history.last().map(|last| {
+                    current_time.signed_duration_since(last.timestamp).num_milliseconds() as f32 / 1000.0 
+                        >= trail_config.update_interval_seconds
+                }).unwrap_or(true);
+            
+            if should_add_point {
+                // Add new trail point
+                trail.history.push(TrailPoint {
+                    position: transform.translation,
+                    timestamp: current_time,
+                });
+            }
+            
+            // Remove old trail points based on age and count limits (use global config)
+            let max_age_millis = (trail_config.max_age_seconds * 1000.0) as i64;
+            trail.history.retain(|point| {
+                current_time.signed_duration_since(point.timestamp).num_milliseconds() <= max_age_millis
+            });
+            
+            // Limit number of points (use global config)
+            if trail.history.len() > trail_config.max_points {
+                let excess = trail.history.len() - trail_config.max_points;
+                trail.history.drain(0..excess);
+            }
+        }
+    }
+    
+    // Add OrbitTrail component to satellites that don't have it but need it
+    for entry in store.items.values() {
+        if let Some(entity) = entry.entity {
+            if entry.show_trail {
+                // Check if entity already has OrbitTrail component
+                if trail_query.get(entity).is_err() {
+                    commands.entity(entity).insert(OrbitTrail::default());
+                }
+            }
+        }
+    }
+}
+
+/// System to draw orbit trails using gizmos
+pub fn draw_orbit_trails_system(
+    store: Res<SatelliteStore>,
+    trail_config: Res<OrbitTrailConfig>,
+    trail_query: Query<(&OrbitTrail, Entity), With<Satellite>>,
+    mut gizmos: Gizmos,
+    sim_time: Res<SimulationTime>,
+) {
+    let current_time = sim_time.current_utc;
+    
+    for (trail, entity) in trail_query.iter() {
+        // Find the satellite entry for this entity to get color and settings
+        if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
+            if !entry.show_trail || trail.history.len() < 2 {
+                continue;
+            }
+            
+            let base_color = entry.color;
+            
+            // Draw lines between consecutive trail points
+            for window in trail.history.windows(2) {
+                let point1 = &window[0];
+                let point2 = &window[1];
+                
+                // Calculate alpha based on age of the older point (use global config)
+                let age_seconds = current_time.signed_duration_since(point1.timestamp).num_milliseconds() as f32 / 1000.0;
+                let alpha = (1.0 - (age_seconds / trail_config.max_age_seconds)).max(0.1).min(1.0);
+                
+                // Create color with fade
+                let trail_color = Color::srgba(
+                    base_color.to_srgba().red,
+                    base_color.to_srgba().green, 
+                    base_color.to_srgba().blue,
+                    alpha
+                );
+                
+                // Draw line segment
+                gizmos.line(point1.position, point2.position, trail_color);
+            }
         }
     }
 }

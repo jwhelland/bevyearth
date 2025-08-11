@@ -80,6 +80,7 @@ pub fn process_fetch_results_system(
                         error: None,
                         coverage_params: None,
                         show_footprint: false,
+                        show_trail: false,
                     };
                     store.items.insert(norad, entry);
                     println!("[TLE DISPATCH] Created new SatEntry for norad={}", norad);
