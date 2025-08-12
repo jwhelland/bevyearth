@@ -3,9 +3,25 @@
 use bevy::prelude::*;
 
 /// Main UI state resource
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct UIState {
     pub show_axes: bool,
+    pub show_left_panel: bool,
+    pub show_right_panel: bool,
+    pub show_top_panel: bool,
+    pub show_bottom_panel: bool,
+}
+
+impl Default for UIState {
+    fn default() -> Self {
+        Self {
+            show_axes: false,
+            show_left_panel: true,
+            show_right_panel: true,
+            show_top_panel: true,
+            show_bottom_panel: false, // Start with bottom panel hidden since it's unused
+        }
+    }
 }
 
 /// Right panel UI state

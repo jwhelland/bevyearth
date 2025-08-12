@@ -36,9 +36,27 @@ pub fn ui_example_system(
     fetch_channels: Option<Res<FetchChannels>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    let mut left = egui::SidePanel::left("left_panel")
-        .resizable(true)
-        .show(ctx, |ui| {
+    
+    // Handle keyboard shortcuts for panel toggles
+    ctx.input(|i| {
+        if i.key_pressed(egui::Key::H) {
+            state.show_left_panel = !state.show_left_panel;
+        }
+        if i.key_pressed(egui::Key::J) {
+            state.show_right_panel = !state.show_right_panel;
+        }
+        if i.key_pressed(egui::Key::K) {
+            state.show_top_panel = !state.show_top_panel;
+        }
+        if i.key_pressed(egui::Key::L) {
+            state.show_bottom_panel = !state.show_bottom_panel;
+        }
+    });
+    let mut left = 0.0;
+    if state.show_left_panel {
+        left = egui::SidePanel::left("left_panel")
+            .resizable(true)
+            .show(ctx, |ui| {
             ui.separator();
 
             ui.heading("Rendering");
@@ -118,10 +136,13 @@ pub fn ui_example_system(
         .response
         .rect
         .width();
+    }
 
-    let mut right = egui::SidePanel::right("right_panel")
-        .resizable(true)
-        .show(ctx, |ui| {
+    let mut right = 0.0;
+    if state.show_right_panel {
+        right = egui::SidePanel::right("right_panel")
+            .resizable(true)
+            .show(ctx, |ui| {
             ui.heading("Satellites");
             ui.separator();
             
@@ -280,78 +301,132 @@ pub fn ui_example_system(
             });
             ui.separator();
             
-            // Scrollable satellite list
+            // Satellite table view
             let mut to_remove: Option<u32> = None;
             let norad_keys: Vec<u32> = store.items.keys().copied().collect();
             
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    for norad in norad_keys {
-                        // Use immutable access for display, collect changes to apply later
-                        if let Some(s) = store.items.get(&norad) {
-                            let mut remove = false;
-                            let mut show_footprint = s.show_footprint;
-                            let mut show_trail = s.show_trail;
-                            let has_propagator = s.propagator.is_some();
-                            let old_footprint = s.show_footprint;
-                            let old_trail = s.show_trail;
-                            
-                            ui.horizontal(|ui| {
-                                let status = if let Some(err) = &s.error {
-                                    format!("Error: {}", err)
-                                } else if s.propagator.is_some() {
-                                    "Ready".to_string()
-                                } else if s.tle.is_some() {
-                                    "TLE".to_string()
-                                } else {
-                                    "Fetching...".to_string()
-                                };
-                                ui.label(format!(
-                                    "#{:>6}  {:<20} [{}]",
-                                    s.norad,
-                                    s.name.as_deref().unwrap_or("Unnamed"),
-                                    status
-                                ));
-                        
-                                // Add checkboxes if satellite is ready
-                                if has_propagator {
-                                    ui.checkbox(&mut show_footprint, "Coverage");
-                                    ui.checkbox(&mut show_trail, "Trail");
-                                }
-                        
-                                if ui.button("Remove").clicked() {
-                                    remove = true;
-                                }
+                    use egui_extras::{TableBuilder, Column};
+                    
+                    TableBuilder::new(ui)
+                        .column(Column::exact(70.0)) // NORAD ID
+                        .column(Column::remainder().at_least(120.0)) // Name
+                        .column(Column::exact(80.0)) // Status
+                        .column(Column::exact(70.0)) // Coverage
+                        .column(Column::exact(60.0)) // Trail
+                        .column(Column::exact(70.0)) // Actions
+                        .header(20.0, |mut header| {
+                            header.col(|ui| {
+                                ui.strong("NORAD");
                             });
-                            
-                            // Apply changes after releasing immutable borrow
-                            let _ = s;
-                            
-                            // Update show_footprint if changed
-                            if has_propagator && show_footprint != old_footprint {
-                                if let Some(s_mut) = store.items.get_mut(&norad) {
-                                    s_mut.show_footprint = show_footprint;
-                                }
-                            }
-                            // Update show_trail if changed
-                            if has_propagator && show_trail != old_trail {
-                                if let Some(s_mut) = store.items.get_mut(&norad) {
-                                    s_mut.show_trail = show_trail;
-                                }
-                            }
-                            if remove {
-                                if let Some(s_mut) = store.items.get_mut(&norad) {
-                                    if let Some(entity) = s_mut.entity.take() {
-                                        // Bevy 0.16: despawn() recursively by default
-                                        commands.entity(entity).despawn();
+                            header.col(|ui| {
+                                ui.strong("Name");
+                            });
+                            header.col(|ui| {
+                                ui.strong("Status");
+                            });
+                            header.col(|ui| {
+                                ui.strong("Coverage");
+                            });
+                            header.col(|ui| {
+                                ui.strong("Trail");
+                            });
+                            header.col(|ui| {
+                                ui.strong("Actions");
+                            });
+                        })
+                        .body(|mut body| {
+                            for norad in norad_keys {
+                                // Use immutable access for display, collect changes to apply later
+                                if let Some(s) = store.items.get(&norad) {
+                                    let mut remove = false;
+                                    let mut show_footprint = s.show_footprint;
+                                    let mut show_trail = s.show_trail;
+                                    let has_propagator = s.propagator.is_some();
+                                    let old_footprint = s.show_footprint;
+                                    let old_trail = s.show_trail;
+                                    
+                                    body.row(18.0, |mut row| {
+                                        // NORAD ID column
+                                        row.col(|ui| {
+                                            ui.label(format!("{}", s.norad));
+                                        });
+                                        
+                                        // Name column
+                                        row.col(|ui| {
+                                            ui.label(s.name.as_deref().unwrap_or("Unnamed"));
+                                        });
+                                        
+                                        // Status column with color coding
+                                        row.col(|ui| {
+                                            let (status_text, status_color) = if let Some(_err) = &s.error {
+                                                ("Error", Color32::RED)
+                                            } else if s.propagator.is_some() {
+                                                ("Ready", Color32::GREEN)
+                                            } else if s.tle.is_some() {
+                                                ("TLE", Color32::YELLOW)
+                                            } else {
+                                                ("Fetching", Color32::GRAY)
+                                            };
+                                            ui.colored_label(status_color, status_text);
+                                        });
+                                        
+                                        // Coverage checkbox column
+                                        row.col(|ui| {
+                                            if has_propagator {
+                                                ui.checkbox(&mut show_footprint, "");
+                                            } else {
+                                                ui.add_enabled(false, egui::Checkbox::new(&mut false, ""));
+                                            }
+                                        });
+                                        
+                                        // Trail checkbox column
+                                        row.col(|ui| {
+                                            if has_propagator {
+                                                ui.checkbox(&mut show_trail, "");
+                                            } else {
+                                                ui.add_enabled(false, egui::Checkbox::new(&mut false, ""));
+                                            }
+                                        });
+                                        
+                                        // Actions column
+                                        row.col(|ui| {
+                                            if ui.small_button("Remove").clicked() {
+                                                remove = true;
+                                            }
+                                        });
+                                    });
+                                    
+                                    // Apply changes after releasing immutable borrow
+                                    let _ = s;
+                                    
+                                    // Update show_footprint if changed
+                                    if has_propagator && show_footprint != old_footprint {
+                                        if let Some(s_mut) = store.items.get_mut(&norad) {
+                                            s_mut.show_footprint = show_footprint;
+                                        }
+                                    }
+                                    // Update show_trail if changed
+                                    if has_propagator && show_trail != old_trail {
+                                        if let Some(s_mut) = store.items.get_mut(&norad) {
+                                            s_mut.show_trail = show_trail;
+                                        }
+                                    }
+                                    if remove {
+                                        if let Some(s_mut) = store.items.get_mut(&norad) {
+                                            if let Some(entity) = s_mut.entity.take() {
+                                                // Bevy 0.16: despawn() recursively by default
+                                                commands.entity(entity).despawn();
+                                            }
+                                        }
+                                        to_remove = Some(norad);
+                                        break;
                                     }
                                 }
-                                to_remove = Some(norad);
-                                break;
                             }
-                        }
-                    }
+                        });
                 });
             
             if let Some(norad) = to_remove {
@@ -362,11 +437,15 @@ pub fn ui_example_system(
         .response
         .rect
         .width();
+    }
 
-    let mut top = egui::TopBottomPanel::top("top_panel")
-        .resizable(true)
-        .show(ctx, |ui| {
+    let mut top = 0.0;
+    if state.show_top_panel {
+        top = egui::TopBottomPanel::top("top_panel")
+            .resizable(true)
+            .show(ctx, |ui| {
             ui.horizontal(|ui| {
+                // Time display
                 ui.strong("UTC:");
                 ui.monospace(sim_time.current_utc.to_rfc3339_opts(SecondsFormat::Secs, true));
                 if (sim_time.time_scale - 1.0).abs() > 1e-6 {
@@ -375,22 +454,52 @@ pub fn ui_example_system(
                 }
                 ui.add_space(10.0);
                 ui.separator();
+                
+                // Panel toggle buttons
+                ui.label("Panels:");
+                if ui.small_button(if state.show_left_panel { "Hide Left (H)" } else { "Show Left (H)" }).clicked() {
+                    state.show_left_panel = !state.show_left_panel;
+                }
+                if ui.small_button(if state.show_right_panel { "Hide Right (J)" } else { "Show Right (J)" }).clicked() {
+                    state.show_right_panel = !state.show_right_panel;
+                }
+                if ui.small_button(if state.show_top_panel { "Hide Top (K)" } else { "Show Top (K)" }).clicked() {
+                    state.show_top_panel = !state.show_top_panel;
+                }
+                if ui.small_button(if state.show_bottom_panel { "Hide Bottom (L)" } else { "Show Bottom (L)" }).clicked() {
+                    state.show_bottom_panel = !state.show_bottom_panel;
+                }
             });
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
         })
         .response
         .rect
         .height();
+    }
 
-    let mut bottom = egui::TopBottomPanel::bottom("bottom_panel")
-        .resizable(true)
-        .show(ctx, |ui| {
-            ui.label("Bottom resizeable panel");
+    let mut bottom = 0.0;
+    if state.show_bottom_panel {
+        bottom = egui::TopBottomPanel::bottom("bottom_panel")
+            .resizable(true)
+            .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Debug Info:");
+                ui.separator();
+                ui.label(format!("Satellites: {}", store.items.len()));
+                if let Some(_fetch) = &fetch_channels {
+                    ui.separator();
+                    ui.label("TLE Fetcher: Active");
+                } else {
+                    ui.separator();
+                    ui.colored_label(Color32::RED, "TLE Fetcher: Inactive");
+                }
+            });
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
         })
         .response
         .rect
         .height();
+    }
 
     // Scale from logical units to physical units.
     left *= window.scale_factor();
