@@ -9,7 +9,7 @@ use chrono::SecondsFormat;
 
 use crate::ui::state::{UIState, RightPanelUI};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
-use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry, OrbitTrailConfig};
+use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry, OrbitTrailConfig, SelectedSatellite};
 use crate::orbital::SimulationTime;
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::visualization::ArrowConfig;
@@ -33,6 +33,7 @@ pub fn ui_example_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut selected_sat: ResMut<SelectedSatellite>,
     fetch_channels: Option<Res<FetchChannels>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
@@ -385,9 +386,11 @@ pub fn ui_example_system(
                                     let old_trail = s.show_trail;
                                     
                                     body.row(18.0, |mut row| {
-                                        // NORAD ID column
+                                        // NORAD ID column (clickable)
                                         row.col(|ui| {
-                                            ui.label(format!("{}", s.norad));
+                                            if ui.button(format!("{}", s.norad)).clicked() {
+                                                selected_sat.0 = Some(s.norad);
+                                            }
                                         });
                                         
                                         // Name column

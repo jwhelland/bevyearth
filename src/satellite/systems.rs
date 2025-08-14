@@ -3,9 +3,10 @@
 use crate::earth::EARTH_RADIUS_KM;
 use crate::orbital::{SimulationTime, eci_to_ecef_km, gmst_rad, minutes_since_epoch};
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{OrbitTrailConfig, SatEcef, SatelliteStore};
+use crate::satellite::resources::{OrbitTrailConfig, SatEcef, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
 use bevy::prelude::*;
+use bevy_panorbit_camera::PanOrbitCamera;
 
 /// System to update the satellite ECEF resource from satellite transforms
 pub fn update_satellite_ecef(
@@ -200,5 +201,92 @@ pub fn draw_orbit_trails_system(
                 gizmos.line(point1.position, point2.position, trail_color);
             }
         }
+    }
+}
+
+/// System to move camera to selected satellite with offset
+pub fn move_camera_to_satellite(
+    mut selected: ResMut<SelectedSatellite>,
+    store: Res<SatelliteStore>,
+    mut q_camera: Query<
+        (&mut PanOrbitCamera, &mut Transform),
+        (With<Camera3d>, Without<Satellite>),
+    >,
+    q_sat: Query<&Transform, With<Satellite>>,
+) {
+    if let Some(norad) = selected.0.take() {
+        println!("[CAMERA] Processing satellite norad={}", norad);
+        if let Some(entry) = store.items.get(&norad) {
+            if let Some(entity) = entry.entity {
+                if let Ok(sat_transform) = q_sat.get(entity) {
+                    let sat_pos = sat_transform.translation;
+                    println!("[CAMERA] Satellite position: {:?}", sat_pos);
+
+                    let dir = sat_pos.normalize();
+                    let offset = 5000.0; // km
+                    let new_pos = dir * (sat_pos.length() + offset);
+                    let new_radius = new_pos.length();
+
+                    // Compute pitch and yaw from direction
+                    let direction = new_pos.normalize();
+                    let pitch = direction.y.asin();
+                    let yaw = direction.x.atan2(direction.z);
+
+                    println!(
+                        "[CAMERA] Calculated - radius: {}, pitch: {}, yaw: {}",
+                        new_radius, pitch, yaw
+                    );
+
+                    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
+                        println!(
+                            "[CAMERA] Before update - radius: {:?}, pitch: {:?}, yaw: {:?}",
+                            poc.radius, poc.pitch, poc.yaw
+                        );
+
+                        // Force immediate camera position without smooth transition
+                        poc.focus = Vec3::ZERO;
+
+                        // Set target values first
+                        poc.target_radius = new_radius;
+                        poc.target_pitch = pitch;
+                        poc.target_yaw = yaw;
+
+                        // Force immediate update by setting current values too
+                        poc.radius = Some(new_radius);
+                        poc.pitch = Some(pitch);
+                        poc.yaw = Some(yaw);
+
+                        // Force immediate update
+                        poc.force_update = true;
+
+                        // Also directly update the camera transform as a backup
+                        let camera_pos = Vec3::new(
+                            new_radius * pitch.cos() * yaw.sin(),
+                            new_radius * pitch.sin(),
+                            new_radius * pitch.cos() * yaw.cos(),
+                        );
+                        cam_transform.translation = camera_pos;
+                        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+
+                        println!(
+                            "[CAMERA] After update - target_radius: {}, target_pitch: {}, target_yaw: {}",
+                            poc.target_radius, poc.target_pitch, poc.target_yaw
+                        );
+                        println!("[CAMERA] Camera position set to: {:?}", camera_pos);
+                        println!("[CAMERA] Camera updated successfully with force_update=true");
+                    } else {
+                        println!("[CAMERA] Failed to get camera");
+                    }
+                } else {
+                    println!("[CAMERA] Failed to get satellite transform");
+                }
+            } else {
+                println!("[CAMERA] No entity for satellite");
+            }
+        } else {
+            println!("[CAMERA] No satellite found for norad={}", norad);
+        }
+        // Clear selection after processing
+        selected.0 = None;
     }
 }

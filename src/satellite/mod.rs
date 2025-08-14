@@ -10,13 +10,10 @@ pub mod resources;
 pub mod systems;
 
 pub use components::{Satellite, SatelliteColor};
-pub use resources::{SatelliteStore, SatEntry, SatEcef, OrbitTrailConfig};
+pub use resources::{OrbitTrailConfig, SatEcef, SatEntry, SatelliteStore, SelectedSatellite};
 pub use systems::{
-    propagate_satellites_system, 
-    update_satellite_ecef, 
-    spawn_missing_satellite_entities_system,
-    update_orbit_trails_system,
-    draw_orbit_trails_system
+    draw_orbit_trails_system, move_camera_to_satellite, propagate_satellites_system,
+    spawn_missing_satellite_entities_system, update_orbit_trails_system, update_satellite_ecef,
 };
 
 /// Plugin for satellite management and propagation
@@ -27,6 +24,7 @@ impl Plugin for SatellitePlugin {
         app.init_resource::<SatEcef>()
             .init_resource::<SatelliteStore>()
             .init_resource::<OrbitTrailConfig>()
+            .init_resource::<SelectedSatellite>()
             .add_systems(
                 Update,
                 (
@@ -35,6 +33,7 @@ impl Plugin for SatellitePlugin {
                     update_satellite_ecef.after(propagate_satellites_system),
                     update_orbit_trails_system.after(propagate_satellites_system),
                     draw_orbit_trails_system.after(update_orbit_trails_system),
+                    move_camera_to_satellite,
                 ),
             );
     }
