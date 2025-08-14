@@ -301,6 +301,42 @@ pub fn ui_example_system(
             });
             ui.separator();
             
+            // Master Controls Section (before the table so it's always visible)
+            ui.heading("Master Controls");
+            ui.separator();
+            
+            // Compute current master states
+            let ready_satellites: Vec<_> = store.items.values()
+                .filter(|s| s.propagator.is_some())
+                .collect();
+            
+            let all_coverage_enabled = !ready_satellites.is_empty() &&
+                ready_satellites.iter().all(|s| s.show_footprint);
+            let all_trails_enabled = !ready_satellites.is_empty() &&
+                ready_satellites.iter().all(|s| s.show_trail);
+            
+            // Master coverage checkbox
+            let mut master_coverage = all_coverage_enabled;
+            if ui.checkbox(&mut master_coverage, "All Coverage").changed() {
+                for entry in store.items.values_mut() {
+                    if entry.propagator.is_some() {
+                        entry.show_footprint = master_coverage;
+                    }
+                }
+            }
+            
+            // Master trails checkbox
+            let mut master_trails = all_trails_enabled;
+            if ui.checkbox(&mut master_trails, "All Trails").changed() {
+                for entry in store.items.values_mut() {
+                    if entry.propagator.is_some() {
+                        entry.show_trail = master_trails;
+                    }
+                }
+            }
+            
+            ui.separator();
+            
             // Satellite table view
             let mut to_remove: Option<u32> = None;
             let norad_keys: Vec<u32> = store.items.keys().copied().collect();
@@ -432,6 +468,7 @@ pub fn ui_example_system(
             if let Some(norad) = to_remove {
                 store.items.remove(&norad);
             }
+            
             ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
         })
         .response
