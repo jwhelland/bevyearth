@@ -17,6 +17,16 @@ use crate::coverage::FootprintConfig;
 use crate::footprint_gizmo::FootprintGizmoConfig;
 use crate::earth::EARTH_RADIUS_KM;
 
+/// Convert Bevy Color to egui Color32
+fn bevy_to_egui_color(color: Color) -> Color32 {
+    let srgba = color.to_srgba();
+    Color32::from_rgb(
+        (srgba.red * 255.0) as u8,
+        (srgba.green * 255.0) as u8,
+        (srgba.blue * 255.0) as u8,
+    )
+}
+
 /// Main UI system that renders all the egui panels
 pub fn ui_example_system(
     mut contexts: EguiContexts,
@@ -371,7 +381,7 @@ pub fn ui_example_system(
                                 ui.strong("Trail");
                             });
                             header.col(|ui| {
-                                ui.strong("Act");
+                                ui.strong("");
                             });
                         })
                         .body(|mut body| {
@@ -388,7 +398,10 @@ pub fn ui_example_system(
                                     body.row(18.0, |mut row| {
                                         // NORAD ID column (clickable)
                                         row.col(|ui| {
-                                            if ui.button(format!("{}", s.norad)).clicked() {
+                                            if ui.add(egui::Button::new(
+                                                egui::RichText::new(format!("{}", s.norad))
+                                                    .color(bevy_to_egui_color(s.color))
+                                            )).clicked() {
                                                 selected_sat.0 = Some(s.norad);
                                             }
                                         });
@@ -432,7 +445,7 @@ pub fn ui_example_system(
                                         
                                         // Actions column
                                         row.col(|ui| {
-                                            if ui.small_button("Remove").clicked() {
+                                            if ui.small_button("x").clicked() {
                                                 remove = true;
                                             }
                                         });
