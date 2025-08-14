@@ -9,6 +9,7 @@ BevyEarth is an interactive 3D application that lets you explore Earth from spac
 ## Features
 
 - **Real-time Satellite Tracking**: Watch satellites move in their actual orbits using live TLE (Two-Line Element) data
+- **Camera Tracking**: Follow any satellite with smooth camera movement as it orbits Earth
 - **Interactive 3D Earth**: Navigate around a detailed Earth model with realistic textures
 - **Satellite Groups**: Browse and select different types of satellites (weather, communication, scientific, etc.)
 - **City Visualization**: See major cities marked on the Earth's surface
@@ -27,5 +28,23 @@ BevyEarth is an interactive 3D application that lets you explore Earth from spac
 
 - **Mouse**: Rotate and zoom around Earth
 - **UI Panel**: Select satellite groups, manage individual satellites, and control visualization options
+- **Satellite Tracking**: Click any satellite's NORAD ID to start camera tracking
+- **Keyboard Shortcuts**:
+  - `H`: Toggle left panel
+  - `J`: Toggle right panel (satellite controls)
+  - `K`: Toggle top panel
+  - `L`: Toggle bottom panel
+
+## Satellite Camera Tracking
+
+The camera tracking feature allows you to follow satellites as they move through their orbits:
+
+1. **Start Tracking**: Click on any satellite's NORAD ID in the satellite list
+2. **Visual Indicators**: Tracked satellites show a 📹 icon and highlighted button
+3. **Stop Tracking**: Use the "Stop Tracking" button in the Camera Tracking section
+4. **Configure**: Adjust tracking distance (1-20km) and smoothness in the UI
+5. **Switch Targets**: Click another satellite to switch tracking
+
+For detailed information, see [SATELLITE_TRACKING.md](SATELLITE_TRACKING.md).
 
 Inspired by: https://blog.graysonhead.net/posts/bevy-proc-earth-1

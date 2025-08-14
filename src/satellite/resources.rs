@@ -67,5 +67,25 @@ impl Default for OrbitTrailConfig {
     }
 }
 /// Resource for tracking the selected satellite for camera focus
-#[derive(Resource, Default)]
-pub struct SelectedSatellite(pub Option<u32>);
+#[derive(Resource)]
+pub struct SelectedSatellite {
+    /// One-time camera movement to satellite (existing behavior)
+    pub selected: Option<u32>,
+    /// Continuous camera tracking of satellite (new behavior)
+    pub tracking: Option<u32>,
+    /// Distance offset from satellite for tracking camera (in km)
+    pub tracking_offset: f32,
+    /// Smooth interpolation factor for camera movement (0.0 to 1.0)
+    pub smooth_factor: f32,
+}
+
+impl Default for SelectedSatellite {
+    fn default() -> Self {
+        Self {
+            selected: None,
+            tracking: None,
+            tracking_offset: 5000.0, // 5000 km default offset
+            smooth_factor: 0.1,      // Smooth camera movement
+        }
+    }
+}
