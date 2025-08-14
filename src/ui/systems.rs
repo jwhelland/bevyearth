@@ -146,145 +146,145 @@ pub fn ui_example_system(
             ui.heading("Satellites");
             ui.separator();
             
-            // Satellite Groups Section
-            ui.heading("Satellite Groups");
-            ui.separator();
+            ui.collapsing("Satellite Groups", |ui| {
+                ui.separator();
             
-            // Group selection dropdown
-            egui::ComboBox::from_label("Select Group")
-                .selected_text(
-                    right_ui.selected_group
-                        .as_ref()
-                        .map(|g| get_group_display_name(g))
-                        .unwrap_or("Choose a group...")
-                )
-                .show_ui(ui, |ui| {
-                    for (group_key, group_name) in SATELLITE_GROUPS {
-                        ui.selectable_value(&mut right_ui.selected_group, Some(group_key.to_string()), *group_name);
+                // Group selection dropdown
+                egui::ComboBox::from_label("Select Group")
+                    .selected_text(
+                        right_ui.selected_group
+                            .as_ref()
+                            .map(|g| get_group_display_name(g))
+                            .unwrap_or("Choose a group...")
+                    )
+                    .show_ui(ui, |ui| {
+                        for (group_key, group_name) in SATELLITE_GROUPS {
+                            ui.selectable_value(&mut right_ui.selected_group, Some(group_key.to_string()), *group_name);
+                        }
+                    });
+            
+                let mut load_group_request = None;
+                let mut set_error = None;
+                let mut set_loading = None;
+            
+                ui.horizontal(|ui| {
+                    let load_btn = ui.button("Load Group").clicked();
+                    if right_ui.group_loading {
+                        ui.spinner();
+                        ui.label("Loading...");
+                    }
+                    
+                    if load_btn && !right_ui.group_loading {
+                        if let Some(group) = &right_ui.selected_group {
+                            load_group_request = Some(group.clone());
+                            set_loading = Some(true);
+                            set_error = Some(None);
+                        } else {
+                            set_error = Some(Some("Please select a group first".to_string()));
+                        }
                     }
                 });
             
-            let mut load_group_request = None;
-            let mut set_error = None;
-            let mut set_loading = None;
-            
-            ui.horizontal(|ui| {
-                let load_btn = ui.button("Load Group").clicked();
-                if right_ui.group_loading {
-                    ui.spinner();
-                    ui.label("Loading...");
-                }
-                
-                if load_btn && !right_ui.group_loading {
-                    if let Some(group) = &right_ui.selected_group {
-                        load_group_request = Some(group.clone());
-                        set_loading = Some(true);
-                        set_error = Some(None);
+                // Handle the group loading request outside the closure
+                if let Some(group) = load_group_request {
+                    right_ui.group_loading = true;
+                    right_ui.error = None;
+                    
+                    // Send group fetch command
+                    if let Some(fetch) = &fetch_channels {
+                        println!("[REQUEST] sending group fetch for group={}", group);
+                        if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
+                            eprintln!("[REQUEST] failed to send group fetch: {}", e);
+                            right_ui.error = Some(format!("Failed to request group: {}", e));
+                            right_ui.group_loading = false;
+                        }
                     } else {
-                        set_error = Some(Some("Please select a group first".to_string()));
-                    }
-                }
-            });
-            
-            // Handle the group loading request outside the closure
-            if let Some(group) = load_group_request {
-                right_ui.group_loading = true;
-                right_ui.error = None;
-                
-                // Send group fetch command
-                if let Some(fetch) = &fetch_channels {
-                    println!("[REQUEST] sending group fetch for group={}", group);
-                    if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
-                        eprintln!("[REQUEST] failed to send group fetch: {}", e);
-                        right_ui.error = Some(format!("Failed to request group: {}", e));
+                        eprintln!("[REQUEST] FetchChannels not available; cannot fetch group");
+                        right_ui.error = Some("Fetch service not available".to_string());
                         right_ui.group_loading = false;
                     }
-                } else {
-                    eprintln!("[REQUEST] FetchChannels not available; cannot fetch group");
-                    right_ui.error = Some("Fetch service not available".to_string());
-                    right_ui.group_loading = false;
                 }
-            }
             
-            // Apply any error state changes
-            if let Some(error) = set_error {
-                right_ui.error = error;
-            }
-            
-            ui.separator();
-            
-            // Individual Satellite Section
-            ui.heading("Individual Satellites");
-            ui.separator();
-            
-            ui.horizontal(|ui| {
-                ui.label("NORAD:");
-                let edit = ui.text_edit_singleline(&mut right_ui.input);
-                let add_btn = ui.button("Add").clicked();
-                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if add_btn || enter {
-                    match right_ui.input.trim().parse::<u32>() {
-                        Ok(norad) => {
-                            right_ui.error = None;
-                            if !store.items.contains_key(&norad) {
-                                // randomized bright color for satellite marker (deterministic by NORAD)
-                                // simple LCG to spread hues without external RNG dependency
-                                let seed = norad
-                                    .wrapping_mul(1664525)
-                                    .wrapping_add(1013904223);
-                                let hue = (seed as f32 / u32::MAX as f32).fract(); // [0,1)
-                                let sat = (0.65 + ((norad % 7) as f32) * 0.035).clamp(0.6, 0.9);
-                                let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
-                                let color = Color::hsl(hue, sat, light);
-                            
-                                // spawn entity placeholder
-                                let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
-                                let entity = commands
-                                    .spawn((
-                                        Mesh3d(meshes.add(mesh)),
-                                        MeshMaterial3d(materials.add(StandardMaterial {
-                                            // base_color: color,
-                                            emissive: color.to_linear() * 20.0,
-                                            ..Default::default()
-                                        })),
-                                        Satellite,
-                                        SatelliteColor(color),
-                                        Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
-                                    ))
-                                    .id();
-                                store.items.insert(norad, SatEntry {
-                                    norad,
-                                    name: None,
-                                    color,
-                                    entity: Some(entity),
-                                    tle: None,
-                                    propagator: None,
-                                    error: None,
-                                    coverage_params: None,
-                                    show_footprint: false,
-                                    show_trail: false,
-                                });
-                                // Immediately send fetch request to background worker via injected resource
-                                if let Some(fetch) = &fetch_channels {
-                                    println!("[REQUEST] sending fetch for norad={}", norad);
-                                    if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
-                                        eprintln!("[REQUEST] failed to send fetch for norad={}: {}", norad, e);
-                                    }
-                                } else {
-                                    eprintln!("[REQUEST] FetchChannels not available; cannot fetch norad={}", norad);
-                                }
-                                // clear input
-                                right_ui.input.clear();
-                            }
-                        }
-                        Err(_) => right_ui.error = Some("Invalid NORAD ID".to_string()),
-                    }
+                // Apply any error state changes
+                if let Some(error) = set_error {
+                    right_ui.error = error;
                 }
+            
+                ui.separator();
             });
-            if let Some(err) = &right_ui.error {
-                ui.colored_label(Color32::RED, err);
-            }
-            ui.separator();
+            
+            ui.collapsing("Individual Satellites", |ui| {
+                ui.separator();
+            
+                ui.horizontal(|ui| {
+                    ui.label("NORAD:");
+                    let edit = ui.text_edit_singleline(&mut right_ui.input);
+                    let add_btn = ui.button("Add").clicked();
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if add_btn || enter {
+                        match right_ui.input.trim().parse::<u32>() {
+                            Ok(norad) => {
+                                right_ui.error = None;
+                                if !store.items.contains_key(&norad) {
+                                    // randomized bright color for satellite marker (deterministic by NORAD)
+                                    // simple LCG to spread hues without external RNG dependency
+                                    let seed = norad
+                                        .wrapping_mul(1664525)
+                                        .wrapping_add(1013904223);
+                                    let hue = (seed as f32 / u32::MAX as f32).fract(); // [0,1)
+                                    let sat = (0.65 + ((norad % 7) as f32) * 0.035).clamp(0.6, 0.9);
+                                    let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
+                                    let color = Color::hsl(hue, sat, light);
+                                
+                                    // spawn entity placeholder
+                                    let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
+                                    let entity = commands
+                                        .spawn((
+                                            Mesh3d(meshes.add(mesh)),
+                                            MeshMaterial3d(materials.add(StandardMaterial {
+                                                // base_color: color,
+                                                emissive: color.to_linear() * 20.0,
+                                                ..Default::default()
+                                            })),
+                                            Satellite,
+                                            SatelliteColor(color),
+                                            Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
+                                        ))
+                                        .id();
+                                    store.items.insert(norad, SatEntry {
+                                        norad,
+                                        name: None,
+                                        color,
+                                        entity: Some(entity),
+                                        tle: None,
+                                        propagator: None,
+                                        error: None,
+                                        coverage_params: None,
+                                        show_footprint: false,
+                                        show_trail: false,
+                                    });
+                                    // Immediately send fetch request to background worker via injected resource
+                                    if let Some(fetch) = &fetch_channels {
+                                        println!("[REQUEST] sending fetch for norad={}", norad);
+                                        if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
+                                            eprintln!("[REQUEST] failed to send fetch for norad={}: {}", norad, e);
+                                        }
+                                    } else {
+                                        eprintln!("[REQUEST] FetchChannels not available; cannot fetch norad={}", norad);
+                                    }
+                                    // clear input
+                                    right_ui.input.clear();
+                                }
+                            }
+                            Err(_) => right_ui.error = Some("Invalid NORAD ID".to_string()),
+                        }
+                    }
+                });
+                if let Some(err) = &right_ui.error {
+                    ui.colored_label(Color32::RED, err);
+                }
+                ui.separator();
+            });
             
             // Clear All button
             ui.horizontal(|ui| {
@@ -301,41 +301,41 @@ pub fn ui_example_system(
             });
             ui.separator();
             
-            // Master Controls Section (before the table so it's always visible)
-            ui.heading("Master Controls");
-            ui.separator();
+            ui.collapsing("Master Controls", |ui| {
+                ui.separator();
             
-            // Compute current master states
-            let ready_satellites: Vec<_> = store.items.values()
-                .filter(|s| s.propagator.is_some())
-                .collect();
+                // Compute current master states
+                let ready_satellites: Vec<_> = store.items.values()
+                    .filter(|s| s.propagator.is_some())
+                    .collect();
             
-            let all_coverage_enabled = !ready_satellites.is_empty() &&
-                ready_satellites.iter().all(|s| s.show_footprint);
-            let all_trails_enabled = !ready_satellites.is_empty() &&
-                ready_satellites.iter().all(|s| s.show_trail);
+                let all_coverage_enabled = !ready_satellites.is_empty() &&
+                    ready_satellites.iter().all(|s| s.show_footprint);
+                let all_trails_enabled = !ready_satellites.is_empty() &&
+                    ready_satellites.iter().all(|s| s.show_trail);
             
-            // Master coverage checkbox
-            let mut master_coverage = all_coverage_enabled;
-            if ui.checkbox(&mut master_coverage, "All Coverage").changed() {
-                for entry in store.items.values_mut() {
-                    if entry.propagator.is_some() {
-                        entry.show_footprint = master_coverage;
+                // Master coverage checkbox
+                let mut master_coverage = all_coverage_enabled;
+                if ui.checkbox(&mut master_coverage, "All Coverage").changed() {
+                    for entry in store.items.values_mut() {
+                        if entry.propagator.is_some() {
+                            entry.show_footprint = master_coverage;
+                        }
                     }
                 }
-            }
             
-            // Master trails checkbox
-            let mut master_trails = all_trails_enabled;
-            if ui.checkbox(&mut master_trails, "All Trails").changed() {
-                for entry in store.items.values_mut() {
-                    if entry.propagator.is_some() {
-                        entry.show_trail = master_trails;
+                // Master trails checkbox
+                let mut master_trails = all_trails_enabled;
+                if ui.checkbox(&mut master_trails, "All Trails").changed() {
+                    for entry in store.items.values_mut() {
+                        if entry.propagator.is_some() {
+                            entry.show_trail = master_trails;
+                        }
                     }
                 }
-            }
             
-            ui.separator();
+                ui.separator();
+            });
             
             // Satellite table view
             let mut to_remove: Option<u32> = None;
@@ -347,12 +347,12 @@ pub fn ui_example_system(
                     use egui_extras::{TableBuilder, Column};
                     
                     TableBuilder::new(ui)
-                        .column(Column::exact(70.0)) // NORAD ID
-                        .column(Column::remainder().at_least(120.0)) // Name
-                        .column(Column::exact(80.0)) // Status
-                        .column(Column::exact(70.0)) // Coverage
-                        .column(Column::exact(60.0)) // Trail
-                        .column(Column::exact(70.0)) // Actions
+                        .column(Column::exact(50.0)) // NORAD ID
+                        .column(Column::remainder().at_least(80.0)) // Name
+                        .column(Column::exact(60.0)) // Status
+                        .column(Column::exact(50.0)) // Coverage
+                        .column(Column::exact(50.0)) // Trail
+                        .column(Column::exact(50.0)) // Actions
                         .header(20.0, |mut header| {
                             header.col(|ui| {
                                 ui.strong("NORAD");
@@ -364,13 +364,13 @@ pub fn ui_example_system(
                                 ui.strong("Status");
                             });
                             header.col(|ui| {
-                                ui.strong("Coverage");
+                                ui.strong("Cov");
                             });
                             header.col(|ui| {
                                 ui.strong("Trail");
                             });
                             header.col(|ui| {
-                                ui.strong("Actions");
+                                ui.strong("Act");
                             });
                         })
                         .body(|mut body| {
@@ -392,7 +392,7 @@ pub fn ui_example_system(
                                         
                                         // Name column
                                         row.col(|ui| {
-                                            ui.label(s.name.as_deref().unwrap_or("Unnamed"));
+                                            ui.add(egui::Label::new(s.name.as_deref().unwrap_or("Unnamed")).truncate());
                                         });
                                         
                                         // Status column with color coding
