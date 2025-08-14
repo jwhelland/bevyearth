@@ -1,6 +1,8 @@
 // Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
 
 use bevy::core_pipeline::Skybox;
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -57,7 +59,8 @@ pub fn setup(
         Camera3d::default(),
         Camera {
             order: 1,
-            hdr: true,
+            hdr: true, // 1. HDR is required for bloom
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
         PanOrbitCamera::default(),
@@ -66,6 +69,8 @@ pub fn setup(
             brightness: 1000.0,
             ..default()
         },
+        Bloom::NATURAL,
+        Tonemapping::TonyMcMapface,
         Transform::from_xyz(25000.0, 8.0, 4.0),
     ));
     commands.spawn((
