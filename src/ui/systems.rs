@@ -243,8 +243,8 @@ pub fn ui_example_system(
                                     .spawn((
                                         Mesh3d(meshes.add(mesh)),
                                         MeshMaterial3d(materials.add(StandardMaterial {
-                                            base_color: color,
-                                            emissive: color.to_linear(),
+                                            // base_color: color,
+                                            emissive: color.to_linear() * 20.0,
                                             ..Default::default()
                                         })),
                                         Satellite,
