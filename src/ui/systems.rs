@@ -348,6 +348,42 @@ pub fn ui_example_system(
                 ui.separator();
             });
             
+            // Tracking Controls Section
+            ui.collapsing("Camera Tracking", |ui| {
+                ui.separator();
+                
+                // Show current tracking status
+                if let Some(tracking_norad) = selected_sat.tracking {
+                    if let Some(entry) = store.items.get(&tracking_norad) {
+                        let sat_name = entry.name.as_deref().unwrap_or("Unnamed");
+                        ui.horizontal(|ui| {
+                            ui.colored_label(Color32::GREEN, "📹 Tracking:");
+                            ui.colored_label(bevy_to_egui_color(entry.color),
+                                format!("{} ({})", sat_name, tracking_norad));
+                        });
+                        
+                        // Stop Tracking button
+                        if ui.button("Stop Tracking").clicked() {
+                            selected_sat.tracking = None;
+                        }
+                        
+                        ui.separator();
+                        
+                        // Tracking configuration
+                        ui.label("Tracking Settings:");
+                        ui.add(egui::Slider::new(&mut selected_sat.tracking_offset, 1000.0..=20000.0)
+                            .text("Distance (km)"));
+                        ui.add(egui::Slider::new(&mut selected_sat.smooth_factor, 0.01..=1.0)
+                            .text("Smoothness"));
+                    }
+                } else {
+                    ui.colored_label(Color32::GRAY, "📹 Not tracking any satellite");
+                    ui.label("Click a satellite NORAD ID to start tracking");
+                }
+                
+                ui.separator();
+            });
+            
             // Satellite table view
             let mut to_remove: Option<u32> = None;
             let norad_keys: Vec<u32> = store.items.keys().copied().collect();
@@ -398,11 +434,27 @@ pub fn ui_example_system(
                                     body.row(18.0, |mut row| {
                                         // NORAD ID column (clickable)
                                         row.col(|ui| {
-                                            if ui.add(egui::Button::new(
-                                                egui::RichText::new(format!("{}", s.norad))
+                                            let is_tracking = selected_sat.tracking == Some(s.norad);
+                                            let button_text = if is_tracking {
+                                                format!("📹 {}", s.norad)
+                                            } else {
+                                                format!("{}", s.norad)
+                                            };
+                                            
+                                            let mut button = egui::Button::new(
+                                                egui::RichText::new(button_text)
                                                     .color(bevy_to_egui_color(s.color))
-                                            )).clicked() {
-                                                selected_sat.0 = Some(s.norad);
+                                            );
+                                            
+                                            // Highlight tracking button
+                                            if is_tracking {
+                                                button = button.fill(Color32::from_rgb(0, 50, 0));
+                                            }
+                                            
+                                            if ui.add(button).clicked() {
+                                                // Set both selected (for one-time camera move) and tracking (for continuous follow)
+                                                selected_sat.selected = Some(s.norad);
+                                                selected_sat.tracking = Some(s.norad);
                                             }
                                         });
                                         

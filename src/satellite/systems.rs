@@ -214,7 +214,7 @@ pub fn move_camera_to_satellite(
     >,
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
-    if let Some(norad) = selected.0.take() {
+    if let Some(norad) = selected.selected.take() {
         println!("[CAMERA] Processing satellite norad={}", norad);
         if let Some(entry) = store.items.get(&norad) {
             if let Some(entity) = entry.entity {
@@ -287,6 +287,95 @@ pub fn move_camera_to_satellite(
             println!("[CAMERA] No satellite found for norad={}", norad);
         }
         // Clear selection after processing
-        selected.0 = None;
+        selected.selected = None;
+    }
+}
+
+/// System to continuously track a satellite with the camera
+pub fn track_satellite_continuously(
+    tracking: Res<SelectedSatellite>,
+    store: Res<SatelliteStore>,
+    mut q_camera: Query<
+        (&mut PanOrbitCamera, &mut Transform),
+        (With<Camera3d>, Without<Satellite>),
+    >,
+    q_sat: Query<&Transform, With<Satellite>>,
+    time: Res<Time>,
+) {
+    // Only track if we have a tracking target
+    if let Some(tracking_norad) = tracking.tracking {
+        if let Some(entry) = store.items.get(&tracking_norad) {
+            if let Some(entity) = entry.entity {
+                if let Ok(sat_transform) = q_sat.get(entity) {
+                    let sat_pos = sat_transform.translation;
+
+                    // Calculate desired camera position with offset
+                    let dir = sat_pos.normalize();
+                    let offset = tracking.tracking_offset;
+                    let target_pos = dir * (sat_pos.length() + offset);
+                    let target_radius = target_pos.length();
+
+                    // Compute pitch and yaw from direction
+                    let direction = target_pos.normalize();
+                    let target_pitch = direction.y.asin();
+                    let target_yaw = direction.x.atan2(direction.z);
+
+                    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
+                        // Smoothly interpolate to target position
+                        let smooth_factor = tracking.smooth_factor;
+                        let dt = time.delta_secs();
+                        let lerp_factor = 1.0 - (1.0 - smooth_factor).powf(dt * 60.0); // 60fps normalized
+
+                        // Update PanOrbitCamera targets
+                        poc.target_radius = target_radius;
+                        poc.target_pitch = target_pitch;
+                        poc.target_yaw = target_yaw;
+                        poc.focus = Vec3::ZERO;
+
+                        // Smoothly update current values if they exist
+                        if let Some(current_radius) = poc.radius {
+                            poc.radius = Some(
+                                current_radius + (target_radius - current_radius) * lerp_factor,
+                            );
+                        } else {
+                            poc.radius = Some(target_radius);
+                        }
+
+                        if let Some(current_pitch) = poc.pitch {
+                            poc.pitch =
+                                Some(current_pitch + (target_pitch - current_pitch) * lerp_factor);
+                        } else {
+                            poc.pitch = Some(target_pitch);
+                        }
+
+                        if let Some(current_yaw) = poc.yaw {
+                            // Handle yaw wrapping for shortest path
+                            let mut yaw_diff = target_yaw - current_yaw;
+                            if yaw_diff > std::f32::consts::PI {
+                                yaw_diff -= 2.0 * std::f32::consts::PI;
+                            } else if yaw_diff < -std::f32::consts::PI {
+                                yaw_diff += 2.0 * std::f32::consts::PI;
+                            }
+                            poc.yaw = Some(current_yaw + yaw_diff * lerp_factor);
+                        } else {
+                            poc.yaw = Some(target_yaw);
+                        }
+
+                        // Also update transform directly for immediate visual feedback
+                        let current_radius = poc.radius.unwrap_or(target_radius);
+                        let current_pitch = poc.pitch.unwrap_or(target_pitch);
+                        let current_yaw = poc.yaw.unwrap_or(target_yaw);
+
+                        let camera_pos = Vec3::new(
+                            current_radius * current_pitch.cos() * current_yaw.sin(),
+                            current_radius * current_pitch.sin(),
+                            current_radius * current_pitch.cos() * current_yaw.cos(),
+                        );
+                        cam_transform.translation = camera_pos;
+                        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+                    }
+                }
+            }
+        }
     }
 }
