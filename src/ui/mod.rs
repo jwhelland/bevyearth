@@ -10,9 +10,11 @@ pub mod groups;
 pub mod panels;
 pub mod state;
 pub mod systems;
+pub mod skybox;
 
 pub use state::{UIState, RightPanelUI};
 pub use systems::ui_example_system;
+pub use skybox::SkyboxPlugin;
 
 /// Plugin for user interface management
 pub struct UiPlugin;
