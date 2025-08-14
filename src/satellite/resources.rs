@@ -1,9 +1,9 @@
 //! Satellite resources for managing satellite data
 
-use bevy::prelude::*;
-use std::collections::HashMap;
 use crate::coverage::CoverageParameters;
 use crate::tle::TleData;
+use bevy::prelude::*;
+use std::collections::HashMap;
 
 /// Resource for storing satellite data and state
 #[derive(Resource)]
@@ -61,8 +61,11 @@ impl Default for OrbitTrailConfig {
     fn default() -> Self {
         Self {
             max_points: 100,
-            max_age_seconds: 300.0, // 5 minutes
+            max_age_seconds: 300.0,       // 5 minutes
             update_interval_seconds: 2.0, // Update every 2 seconds
         }
     }
 }
+/// Resource for tracking the selected satellite for camera focus
+#[derive(Resource, Default)]
+pub struct SelectedSatellite(pub Option<u32>);
