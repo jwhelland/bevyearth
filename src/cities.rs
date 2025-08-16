@@ -3,13 +3,15 @@ use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;
 
-
 /// Plugin for city visualization and management
 pub struct CitiesPlugin;
 
 impl Plugin for CitiesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (initialize_cities_ecef, spawn_city_population_spheres).chain());
+        app.add_systems(
+            Startup,
+            (initialize_cities_ecef, spawn_city_population_spheres).chain(),
+        );
     }
 }
 
@@ -17,14 +19,14 @@ impl Plugin for CitiesPlugin {
 fn initialize_cities_ecef(mut commands: Commands) {
     let major_cities = major_cities_data();
     let mut cache = Vec::with_capacity(major_cities.len());
-    
+
     for (_name, latitude, longitude, _population) in &major_cities {
         let ecef = Coordinates::from_degrees(*latitude, *longitude)
             .unwrap()
             .get_point_on_sphere(); // already returns EARTH_RADIUS_KM scaled Vec3
         cache.push(ecef);
     }
-    
+
     commands.insert_resource(CitiesEcef(cache));
 }
 
@@ -50,7 +52,6 @@ pub struct CityMarker {
 // Expose major_cities so both mesh spawning and ECEF cache use the same data
 pub fn major_cities_data() -> Vec<(String, f32, f32, f32)> {
     vec![
-        (String::from("Zero"), 0.0, 0.0, 37.4),
         (String::from("Tokyo"), 35.6762, 139.6503, 37.4),
         (String::from("Delhi"), 28.6139, 77.2090, 32.9),
         (String::from("Shanghai"), 31.2304, 121.4737, 28.5),

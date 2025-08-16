@@ -10,9 +10,9 @@ pub mod parser;
 pub mod systems;
 pub mod types;
 
-pub use types::{TleData, FetchCommand, FetchChannels};
 pub use fetcher::start_tle_worker;
 pub use systems::process_fetch_results_system;
+pub use types::{FetchChannels, FetchCommand, TleData};
 
 /// Plugin for TLE data management and processing
 pub struct TlePlugin;

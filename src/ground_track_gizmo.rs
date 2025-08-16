@@ -6,8 +6,8 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-use crate::ground_track::GroundTrackConfig;
 use crate::earth::EARTH_RADIUS_KM;
+use crate::ground_track::GroundTrackConfig;
 use crate::satellite::{Satellite, SatelliteStore};
 
 /// Plugin for ground track gizmo rendering and management
@@ -15,14 +15,13 @@ pub struct GroundTrackGizmoPlugin;
 
 impl Plugin for GroundTrackGizmoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GroundTrackGizmoConfig>()
-            .add_systems(
-                Update,
-                (
-                    manage_ground_track_gizmo_components_system,
-                    draw_ground_track_gizmos_system.after(manage_ground_track_gizmo_components_system),
-                ),
-            );
+        app.init_resource::<GroundTrackGizmoConfig>().add_systems(
+            Update,
+            (
+                manage_ground_track_gizmo_components_system,
+                draw_ground_track_gizmos_system.after(manage_ground_track_gizmo_components_system),
+            ),
+        );
     }
 }
 
@@ -45,14 +44,16 @@ fn manage_ground_track_gizmo_components_system(
 
     for entry in store.items.values_mut() {
         let should_show = entry.show_ground_track && entry.propagator.is_some();
-        
+
         if let Some(sat_entity) = entry.entity {
             if let Ok(entity) = satellite_query.get(sat_entity) {
                 let has_gizmo_component = gizmo_query.get(entity).is_ok();
-                
+
                 if should_show && !has_gizmo_component {
                     // Add GroundTrackGizmo component
-                    commands.entity(entity).insert(GroundTrackGizmo::new(entry.norad));
+                    commands
+                        .entity(entity)
+                        .insert(GroundTrackGizmo::new(entry.norad));
                 } else if !should_show && has_gizmo_component {
                     // Remove GroundTrackGizmo component
                     commands.entity(entity).remove::<GroundTrackGizmo>();
@@ -155,7 +156,15 @@ fn draw_satellite_ground_track_gizmo(
 
     // Draw center dot if enabled
     if config.show_center_dot {
-        draw_center_dot(gizmos, nadir_point, up, right, forward, config.center_dot_size, config.circle_color);
+        draw_center_dot(
+            gizmos,
+            nadir_point,
+            up,
+            right,
+            forward,
+            config.center_dot_size,
+            config.circle_color,
+        );
     }
 
     draw_ground_track_circle(

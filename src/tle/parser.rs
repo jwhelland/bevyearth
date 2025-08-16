@@ -44,7 +44,7 @@ mod tests {
         let line1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
         let result = parse_tle_epoch_to_utc(line1);
         assert!(result.is_some());
-        
+
         // Test with invalid line
         let invalid_line = "too short";
         let result = parse_tle_epoch_to_utc(invalid_line);

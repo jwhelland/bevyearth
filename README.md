@@ -47,4 +47,6 @@ The camera tracking feature allows you to follow satellites as they move through
 
 For detailed information, see [SATELLITE_TRACKING.md](SATELLITE_TRACKING.md).
 
-Inspired by: https://blog.graysonhead.net/posts/bevy-proc-earth-1
+Inspired by: 
+- https://blog.graysonhead.net/posts/bevy-proc-earth-1
+- https://github.com/jan-tennert/solarsim
