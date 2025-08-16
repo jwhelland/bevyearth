@@ -29,23 +29,24 @@ pub fn render_left_panel(
     ui: &mut egui::Ui,
     state: &mut UIState,
     arrows_cfg: &mut ArrowConfig,
-    ground_track_cfg: &mut GroundTrackConfig,
-    gizmo_cfg: &mut GroundTrackGizmoConfig,
-    trail_cfg: &mut OrbitTrailConfig,
     sim_time: &mut SimulationTime,
 ) {
-    ui.separator();
+    // ui.separator();
 
-    ui.heading("Rendering");
-    ui.separator();
-    ui.checkbox(&mut state.show_axes, "Show axes");
+    // ui.heading("Rendering");
+    // ui.separator();
+    // ui.checkbox(&mut state.show_axes, "Show axes");
 
     ui.separator();
     ui.heading("Simulation time");
     ui.horizontal(|ui| {
         ui.label("Scale:");
-        ui.add(egui::Slider::new(&mut sim_time.time_scale, 0.0..=1000.0).logarithmic(true));
+        ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
         if ui.button("1x").clicked() {
+            sim_time.time_scale = 1.0;
+        }
+        if ui.button("Now").clicked() {
+            sim_time.current_utc = chrono::Utc::now();
             sim_time.time_scale = 1.0;
         }
     });
@@ -72,40 +73,6 @@ pub fn render_left_panel(
         });
         ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
     });
-
-    ui.separator();
-    ui.heading("Sat Ground Tracks");
-    ui.separator();
-
-    ui.checkbox(&mut ground_track_cfg.enabled, "Show ground tracks");
-    ui.add(
-        egui::Slider::new(&mut ground_track_cfg.radius_km, 10.0..=500.0).text("Track radius (km)"),
-    );
-
-    ui.collapsing("Gizmo Settings", |ui| {
-        ui.checkbox(&mut gizmo_cfg.enabled, "Use gizmo circles (recommended)");
-        ui.add(egui::Slider::new(&mut gizmo_cfg.circle_segments, 16..=128).text("Circle segments"));
-        ui.checkbox(&mut gizmo_cfg.show_center_dot, "Show center dot");
-        if gizmo_cfg.show_center_dot {
-            ui.add(
-                egui::Slider::new(&mut gizmo_cfg.center_dot_size, 50.0..=500.0)
-                    .text("Center dot size (km)"),
-            );
-        }
-    });
-
-    ui.separator();
-    ui.heading("Orbit Trails");
-    ui.separator();
-
-    ui.add(egui::Slider::new(&mut trail_cfg.max_points, 10..=500).text("History points"));
-    ui.add(
-        egui::Slider::new(&mut trail_cfg.max_age_seconds, 60.0..=1800.0).text("Max age (seconds)"),
-    );
-    ui.add(
-        egui::Slider::new(&mut trail_cfg.update_interval_seconds, 0.5..=10.0)
-            .text("Update interval (seconds)"),
-    );
 }
 
 pub fn render_right_panel(
@@ -116,6 +83,9 @@ pub fn render_right_panel(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     selected_sat: &mut SelectedSatellite,
+    ground_track_cfg: &mut GroundTrackConfig,
+    gizmo_cfg: &mut GroundTrackGizmoConfig,
+    trail_cfg: &mut OrbitTrailConfig,
     fetch_channels: &Option<Res<FetchChannels>>,
 ) {
     ui.heading("Satellites");
@@ -286,7 +256,6 @@ pub fn render_right_panel(
         ui.label(format!("({} satellites)", store.items.len()));
     });
     ui.separator();
-
     ui.collapsing("Master Controls", |ui| {
         ui.separator();
 
@@ -324,6 +293,48 @@ pub fn render_right_panel(
                 }
             }
         }
+
+        ui.separator();
+    });
+
+    ui.collapsing("Ground Track Settings", |ui| {
+        ui.separator();
+
+        ui.checkbox(&mut ground_track_cfg.enabled, "Show ground tracks");
+        ui.add(
+            egui::Slider::new(&mut ground_track_cfg.radius_km, 10.0..=500.0)
+                .text("Track radius (km)"),
+        );
+
+        ui.collapsing("Gizmo Settings", |ui| {
+            ui.checkbox(&mut gizmo_cfg.enabled, "Use gizmo circles (recommended)");
+            ui.add(
+                egui::Slider::new(&mut gizmo_cfg.circle_segments, 16..=128).text("Circle segments"),
+            );
+            ui.checkbox(&mut gizmo_cfg.show_center_dot, "Show center dot");
+            if gizmo_cfg.show_center_dot {
+                ui.add(
+                    egui::Slider::new(&mut gizmo_cfg.center_dot_size, 50.0..=500.0)
+                        .text("Center dot size (km)"),
+                );
+            }
+        });
+
+        ui.separator();
+    });
+
+    ui.collapsing("Orbit Trail Settings", |ui| {
+        ui.separator();
+
+        ui.add(egui::Slider::new(&mut trail_cfg.max_points, 10..=500).text("History points"));
+        ui.add(
+            egui::Slider::new(&mut trail_cfg.max_age_seconds, 60.0..=1800.0)
+                .text("Max age (seconds)"),
+        );
+        ui.add(
+            egui::Slider::new(&mut trail_cfg.update_interval_seconds, 0.5..=10.0)
+                .text("Update interval (seconds)"),
+        );
 
         ui.separator();
     });
