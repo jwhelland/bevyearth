@@ -2,9 +2,11 @@
 
 An interactive 3D Earth visualization that tracks satellites in real-time.
 
+<img src="./assets/bevyearth.png" width="100%"/>
+
 ## What is BevyEarth?
 
-BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using live data from satellite tracking databases, you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model.
+BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from satellite tracking database [CelesTrak](https://celestrak.org) , you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model.
 
 ## Features
 
@@ -47,6 +49,7 @@ The camera tracking feature allows you to follow satellites as they move through
 
 For detailed information, see [SATELLITE_TRACKING.md](SATELLITE_TRACKING.md).
 
-Inspired by: 
+## Inspiration 
 - https://blog.graysonhead.net/posts/bevy-proc-earth-1
 - https://github.com/jan-tennert/solarsim
+- https://celestrak.org
