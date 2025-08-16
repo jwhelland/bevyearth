@@ -1,12 +1,17 @@
 # BevyEarth
 
-An interactive 3D Earth visualization that tracks satellites in real-time.
+An interactive 3D Earth visualization that displays current satellite tracks and into the future.
 
 <img src="./assets/bevyearth.png" width="100%"/>
 
 ## What is BevyEarth?
 
-BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from satellite tracking database [CelesTrak](https://celestrak.org) , you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model.
+BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from satellite tracking database [CelesTrak](https://celestrak.org), you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model.  Try loading all the [Starlink](https://www.starlink.com) satellites for some real fun!
+
+## Why
+This is a toy project to help me learn bevy and rust, along with a good dose of AI pair programming (thank you Claude, Gemini, Grok and others).  
+
+**What a world we live in!**
 
 ## Features
 
@@ -15,7 +20,7 @@ BevyEarth is an interactive 3D application that lets you explore Earth from spac
 - **Interactive 3D Earth**: Navigate around a detailed Earth model with realistic textures
 - **Satellite Groups**: Browse and select different types of satellites (weather, communication, scientific, etc.)
 - **City Visualization**: See major cities marked on the Earth's surface
-- **Coverage Areas**: Visualize satellite coverage footprints
+- **Satellite Earth Trackss**: Visualize satellite tracks on the Earth
 - **Time Controls**: Speed up or slow down time to see orbital patterns
 - **Satellite Management**: Add, remove, and organize satellites in your view
 
@@ -42,12 +47,10 @@ BevyEarth is an interactive 3D application that lets you explore Earth from spac
 The camera tracking feature allows you to follow satellites as they move through their orbits:
 
 1. **Start Tracking**: Click on any satellite's NORAD ID in the satellite list
-2. **Visual Indicators**: Tracked satellites show a 📹 icon and highlighted button
-3. **Stop Tracking**: Use the "Stop Tracking" button in the Camera Tracking section
+2. **Visual Indicators**: Tracked satellite shows a 📹 icon and highlighted button
+3. **Stop Tracking**: Use the "Stop Tracking" button in the Camera Tracking section or click the NORAD ID again
 4. **Configure**: Adjust tracking distance (1-20km) and smoothness in the UI
 5. **Switch Targets**: Click another satellite to switch tracking
-
-For detailed information, see [SATELLITE_TRACKING.md](SATELLITE_TRACKING.md).
 
 ## Inspiration 
 - https://blog.graysonhead.net/posts/bevy-proc-earth-1
