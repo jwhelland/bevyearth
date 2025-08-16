@@ -79,7 +79,6 @@ pub fn spawn_missing_satellite_entities_system(
                 ))
                 .id();
             entry.entity = Some(entity);
-            println!("[SPAWN] Created entity for satellite norad={}", norad);
         }
     }
 }
@@ -215,12 +214,10 @@ pub fn move_camera_to_satellite(
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
     if let Some(norad) = selected.selected.take() {
-        println!("[CAMERA] Processing satellite norad={}", norad);
         if let Some(entry) = store.items.get(&norad) {
             if let Some(entity) = entry.entity {
                 if let Ok(sat_transform) = q_sat.get(entity) {
                     let sat_pos = sat_transform.translation;
-                    println!("[CAMERA] Satellite position: {:?}", sat_pos);
 
                     let dir = sat_pos.normalize();
                     let offset = 5000.0; // km
@@ -232,17 +229,7 @@ pub fn move_camera_to_satellite(
                     let pitch = direction.y.asin();
                     let yaw = direction.x.atan2(direction.z);
 
-                    println!(
-                        "[CAMERA] Calculated - radius: {}, pitch: {}, yaw: {}",
-                        new_radius, pitch, yaw
-                    );
-
                     if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-                        println!(
-                            "[CAMERA] Before update - radius: {:?}, pitch: {:?}, yaw: {:?}",
-                            poc.radius, poc.pitch, poc.yaw
-                        );
-
                         // Force immediate camera position without smooth transition
                         poc.focus = Vec3::ZERO;
 
@@ -267,13 +254,6 @@ pub fn move_camera_to_satellite(
                         );
                         cam_transform.translation = camera_pos;
                         cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-
-                        println!(
-                            "[CAMERA] After update - target_radius: {}, target_pitch: {}, target_yaw: {}",
-                            poc.target_radius, poc.target_pitch, poc.target_yaw
-                        );
-                        println!("[CAMERA] Camera position set to: {:?}", camera_pos);
-                        println!("[CAMERA] Camera updated successfully with force_update=true");
                     } else {
                         println!("[CAMERA] Failed to get camera");
                     }
