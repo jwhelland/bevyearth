@@ -78,8 +78,7 @@ pub fn process_fetch_results_system(
                         }),
                         propagator,
                         error: None,
-                        coverage_params: None,
-                        show_footprint: false,
+                        show_ground_track: false,
                         show_trail: false,
                     };
                     store.items.insert(norad, entry);

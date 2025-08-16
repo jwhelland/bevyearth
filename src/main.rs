@@ -16,9 +16,9 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 mod cities;
 mod coord;
-mod coverage;
 mod earth;
-mod footprint_gizmo;
+mod ground_track;
+mod ground_track_gizmo;
 mod orbital;
 mod satellite;
 mod tle;
@@ -27,9 +27,9 @@ mod visualization;
 
 // Import plugins
 use cities::CitiesPlugin;
-use coverage::CoveragePlugin;
 use earth::EarthPlugin;
-use footprint_gizmo::FootprintGizmoPlugin;
+use ground_track::GroundTrackPlugin;
+use ground_track_gizmo::GroundTrackGizmoPlugin;
 use orbital::OrbitalPlugin;
 use satellite::SatellitePlugin;
 use tle::TlePlugin;
@@ -120,8 +120,8 @@ fn main() {
         .add_plugins(UiPlugin)
         .add_plugins(SkyboxPlugin)
         .add_plugins(VisualizationPlugin)
-        .add_plugins(CoveragePlugin)
-        .add_plugins(FootprintGizmoPlugin)
+        .add_plugins(GroundTrackPlugin)
+        .add_plugins(GroundTrackGizmoPlugin)
         .add_systems(Startup, setup)
         .run();
 }
