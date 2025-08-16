@@ -28,7 +28,7 @@ mod tests {
         // Test with a known time
         let test_time = Utc.with_ymd_and_hms(2000, 1, 1, 12, 0, 0).unwrap();
         let gmst = gmst_rad(test_time);
-        
+
         // GMST should be between 0 and 2π
         assert!(gmst >= 0.0);
         assert!(gmst < std::f64::consts::TAU);
@@ -39,16 +39,16 @@ mod tests {
         let eci = DVec3::new(1000.0, 0.0, 0.0);
         let gmst = 0.0; // No rotation
         let ecef = eci_to_ecef_km(eci, gmst);
-        
+
         // With no rotation, should be the same
         assert!((ecef.x - 1000.0).abs() < 1e-10);
         assert!(ecef.y.abs() < 1e-10);
         assert!(ecef.z.abs() < 1e-10);
-        
+
         // Test with 90 degree rotation
         let gmst_90 = std::f64::consts::PI / 2.0;
         let ecef_90 = eci_to_ecef_km(eci, gmst_90);
-        
+
         // X should become -Y, Y should become X
         assert!(ecef_90.x.abs() < 1e-10);
         assert!((ecef_90.y - 1000.0).abs() < 1e-10);

@@ -1,11 +1,11 @@
 //! Arrow visualization systems
 
-use bevy::prelude::*;
-use crate::visualization::config::ArrowConfig;
-use crate::satellite::{Satellite, SatelliteColor};
 use crate::cities::CitiesEcef;
 use crate::coord::{hemisphere_prefilter, los_visible_ecef};
 use crate::earth::EARTH_RADIUS_KM;
+use crate::satellite::{Satellite, SatelliteColor};
+use crate::visualization::config::ArrowConfig;
+use bevy::prelude::*;
 
 /// Draw arrow segment from city to satellite
 pub fn draw_arrow_segment(
@@ -37,7 +37,9 @@ pub fn draw_arrow_segment(
         } else {
             ((total_len - near) / (far - near)).clamp(0.0, 1.0)
         };
-        config.gradient_near_color.mix(&config.gradient_far_color, t)
+        config
+            .gradient_near_color
+            .mix(&config.gradient_far_color, t)
     } else {
         fallback_color
     };

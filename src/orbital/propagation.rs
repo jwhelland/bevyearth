@@ -17,10 +17,10 @@ mod tests {
     fn test_minutes_since_epoch() {
         let epoch = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
         let sim_time = Utc.with_ymd_and_hms(2000, 1, 1, 1, 0, 0).unwrap();
-        
+
         let minutes = minutes_since_epoch(sim_time, epoch);
         assert!((minutes - 60.0).abs() < 1e-10);
-        
+
         // Test with fractional seconds
         let sim_time_frac = Utc.with_ymd_and_hms(2000, 1, 1, 0, 1, 30).unwrap();
         let minutes_frac = minutes_since_epoch(sim_time_frac, epoch);
@@ -31,7 +31,7 @@ mod tests {
     fn test_minutes_since_epoch_negative() {
         let epoch = Utc.with_ymd_and_hms(2000, 1, 1, 1, 0, 0).unwrap();
         let sim_time = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
-        
+
         let minutes = minutes_since_epoch(sim_time, epoch);
         assert!((minutes + 60.0).abs() < 1e-10);
     }

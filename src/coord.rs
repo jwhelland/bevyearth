@@ -161,7 +161,7 @@ mod tests {
     fn test_coordinates_from_degrees_valid() {
         let coord = Coordinates::from_degrees(45.0, 90.0).unwrap();
         let (lat_deg, lon_deg) = coord.as_degrees();
-        
+
         assert!((lat_deg - 45.0).abs() < EPSILON);
         assert!((lon_deg - 90.0).abs() < EPSILON);
     }
@@ -193,7 +193,7 @@ mod tests {
             longitude: PI / 2.0, // 90 degrees
         };
         let (lat_deg, lon_deg) = coord.as_degrees();
-        
+
         assert!((lat_deg - 45.0).abs() < EPSILON);
         assert!((lon_deg - 90.0).abs() < EPSILON);
     }
@@ -204,7 +204,7 @@ mod tests {
         let vec = Vec3::new(0.0, 1.0, 0.0); // North pole
         let coord = Coordinates::from(vec);
         let (lat_deg, lon_deg) = coord.as_degrees();
-        
+
         assert!((lat_deg - 90.0).abs() < EPSILON);
         // Longitude at poles is undefined, but should be finite
         assert!(lon_deg.is_finite());
@@ -216,7 +216,7 @@ mod tests {
         let vec = Vec3::new(1.0, 0.0, 0.0);
         let coord = Coordinates::from(vec);
         let (lat_deg, lon_deg) = coord.as_degrees();
-        
+
         assert!((lat_deg - 0.0).abs() < EPSILON);
         assert!((lon_deg - 90.0).abs() < EPSILON);
     }
@@ -226,10 +226,10 @@ mod tests {
         // Test conversion back to 3D point
         let coord = Coordinates::from_degrees(0.0, 0.0).unwrap(); // Equator, prime meridian
         let point = coord.get_point_on_sphere();
-        
+
         // Should be on the sphere surface
         assert!((point.length() - EARTH_RADIUS_KM).abs() < EPSILON);
-        
+
         // Should be at (0, 0, EARTH_RADIUS_KM) in Bevy coordinates
         assert!((point.x - 0.0).abs() < EPSILON);
         assert!((point.y - 0.0).abs() < EPSILON);
@@ -240,7 +240,7 @@ mod tests {
     fn test_get_point_on_sphere_north_pole() {
         let coord = Coordinates::from_degrees(90.0, 0.0).unwrap();
         let point = coord.get_point_on_sphere();
-        
+
         assert!((point.length() - EARTH_RADIUS_KM).abs() < EPSILON);
         assert!((point.y - EARTH_RADIUS_KM).abs() < EPSILON);
         assert!(point.x.abs() < EPSILON);
@@ -255,7 +255,7 @@ mod tests {
         // Test the generic map function
         let result = map((0.0, 10.0), (0.0, 100.0), 5.0);
         assert!((result - 50.0).abs() < EPSILON);
-        
+
         let result = map((-1.0, 1.0), (0.0, 1.0), 0.0);
         assert!((result - 0.5).abs() < EPSILON);
     }
@@ -265,11 +265,11 @@ mod tests {
         // Test north pole
         let result = map_latitude(90.0).unwrap();
         assert!((result - 0.0).abs() < EPSILON);
-        
+
         // Test equator
         let result = map_latitude(0.0).unwrap();
         assert!((result - 0.5).abs() < EPSILON);
-        
+
         // Test south pole
         let result = map_latitude(-90.0).unwrap();
         assert!((result - 1.0).abs() < EPSILON);
@@ -286,11 +286,11 @@ mod tests {
         // Test western edge
         let result = map_longitude(-180.0).unwrap();
         assert!((result - 0.0).abs() < EPSILON);
-        
+
         // Test prime meridian
         let result = map_longitude(0.0).unwrap();
         assert!((result - 0.5).abs() < EPSILON);
-        
+
         // Test eastern edge
         let result = map_longitude(180.0).unwrap();
         assert!((result - 1.0).abs() < EPSILON);
@@ -306,7 +306,7 @@ mod tests {
     fn test_convert_to_uv_mercator() {
         let coord = Coordinates::from_degrees(0.0, 0.0).unwrap();
         let (u, v) = coord.convert_to_uv_mercator();
-        
+
         // Equator, prime meridian should map to (0.5, 0.5)
         assert!((u - 0.5).abs() < EPSILON);
         assert!((v - 0.5).abs() < EPSILON);
@@ -317,7 +317,7 @@ mod tests {
         // City on surface, satellite high above
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM * 2.0);
-        
+
         assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
     }
 
@@ -326,7 +326,7 @@ mod tests {
         // City on one side, satellite on opposite side (blocked by Earth)
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(0.0, 0.0, -EARTH_RADIUS_KM * 2.0);
-        
+
         assert!(!los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
     }
 
@@ -334,7 +334,7 @@ mod tests {
     fn test_los_visible_ecef_same_position() {
         // Degenerate case: city and satellite at same position
         let position = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        
+
         assert!(!los_visible_ecef(position, position, EARTH_RADIUS_KM));
     }
 
@@ -343,7 +343,7 @@ mod tests {
         // Test a simple case: city on surface, satellite very high directly above
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM * 10.0); // Very high above
-        
+
         // This should definitely be visible
         assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
     }
@@ -354,7 +354,7 @@ mod tests {
         // This tests the epsilon handling in the algorithm
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(EARTH_RADIUS_KM * 2.0, 0.0, EARTH_RADIUS_KM);
-        
+
         // This should be visible (line along surface, not through interior)
         assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
     }
@@ -364,7 +364,7 @@ mod tests {
         // Both points in positive Z hemisphere
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(100.0, 100.0, EARTH_RADIUS_KM * 2.0);
-        
+
         assert!(hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM));
     }
 
@@ -373,7 +373,7 @@ mod tests {
         // City in positive Z, satellite in negative Z
         let city = Vec3::new(0.0, 0.0, EARTH_RADIUS_KM);
         let satellite = Vec3::new(0.0, 0.0, -EARTH_RADIUS_KM * 2.0);
-        
+
         assert!(!hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM));
     }
 
@@ -382,7 +382,7 @@ mod tests {
         // Test the boundary condition
         let city = Vec3::new(EARTH_RADIUS_KM, 0.0, 0.0);
         let satellite = Vec3::new(0.0, EARTH_RADIUS_KM, 0.0);
-        
+
         // dot product = EARTH_RADIUS_KM^2, should be equal to threshold
         let result = hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM);
         // This is exactly at the boundary, behavior depends on floating point precision
@@ -396,7 +396,7 @@ mod tests {
         let original = Vec3::new(1.0, 1.0, 1.0).normalize();
         let coord = Coordinates::from(original);
         let reconstructed = coord.get_point_on_sphere().normalize();
-        
+
         // Should be very close (within floating point precision)
         let diff = (original - reconstructed).length();
         assert!(diff < 1e-5);

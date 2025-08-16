@@ -2,7 +2,10 @@
 
 use bevy::prelude::*;
 use chrono::{DateTime, Utc};
-use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}};
+use std::sync::{
+    Arc, Mutex,
+    mpsc::{Receiver, Sender},
+};
 
 /// TLE data structure
 #[derive(Clone)]
@@ -35,9 +38,9 @@ pub enum FetchResultMsg {
         line2: String,
         epoch_utc: DateTime<Utc>,
     },
-    Failure { 
-        norad: u32, 
-        error: String 
+    Failure {
+        norad: u32,
+        error: String,
     },
 }
 

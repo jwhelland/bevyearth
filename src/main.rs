@@ -97,7 +97,7 @@ fn main() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "Bevy Earth)".to_string(),
+                        title: "Bevy Earth Satellite Tracker".to_string(),
                         present_mode: PresentMode::AutoVsync,
                         ..default()
                     }),
