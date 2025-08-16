@@ -13,8 +13,8 @@ use crate::satellite::{Satellite, SatelliteColor, SatelliteStore, SatEntry, Orbi
 use crate::orbital::SimulationTime;
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::visualization::ArrowConfig;
-use crate::coverage::FootprintConfig;
-use crate::footprint_gizmo::FootprintGizmoConfig;
+use crate::ground_track::GroundTrackConfig;
+use crate::ground_track_gizmo::GroundTrackGizmoConfig;
 use crate::earth::EARTH_RADIUS_KM;
 
 /// Convert Bevy Color to egui Color32
@@ -34,8 +34,8 @@ pub fn ui_example_system(
     window: Single<&mut Window, With<PrimaryWindow>>,
     mut state: ResMut<UIState>,
     mut arrows_cfg: ResMut<ArrowConfig>,
-    mut footprint_cfg: ResMut<FootprintConfig>,
-    mut gizmo_cfg: ResMut<FootprintGizmoConfig>,
+    mut ground_track_cfg: ResMut<GroundTrackConfig>,
+    mut gizmo_cfg: ResMut<GroundTrackGizmoConfig>,
     mut trail_cfg: ResMut<OrbitTrailConfig>,
     mut sim_time: ResMut<SimulationTime>,
     mut store: ResMut<SatelliteStore>,
@@ -103,29 +103,17 @@ pub fn ui_example_system(
             });
 
             ui.separator();
-            ui.heading("Coverage Footprints");
+            ui.heading("Ground Tracks");
             ui.separator();
             
-            ui.checkbox(&mut footprint_cfg.enabled, "Show footprints");
-            
-            ui.collapsing("Default Parameters", |ui| {
-                ui.add(egui::Slider::new(&mut footprint_cfg.default_frequency_mhz, 100.0..=30000.0)
-                    .text("Frequency (MHz)"));
-                ui.add(egui::Slider::new(&mut footprint_cfg.default_tx_power_dbm, 0.0..=50.0)
-                    .text("TX Power (dBm)"));
-                ui.add(egui::Slider::new(&mut footprint_cfg.default_antenna_gain_dbi, 0.0..=30.0)
-                    .text("Antenna Gain (dBi)"));
-                ui.add(egui::Slider::new(&mut footprint_cfg.default_min_signal_dbm, -150.0..=-50.0)
-                    .text("Min Signal (dBm)"));
-                ui.add(egui::Slider::new(&mut footprint_cfg.default_min_elevation_deg, 0.0..=45.0)
-                    .text("Min Elevation (°)"));
-            });
+            ui.checkbox(&mut ground_track_cfg.enabled, "Show ground tracks");
+            ui.add(egui::Slider::new(&mut ground_track_cfg.radius_km, 10.0..=500.0)
+                .text("Track radius (km)"));
             
             ui.collapsing("Gizmo Settings", |ui| {
                 ui.checkbox(&mut gizmo_cfg.enabled, "Use gizmo circles (recommended)");
                 ui.add(egui::Slider::new(&mut gizmo_cfg.circle_segments, 16..=128)
                     .text("Circle segments"));
-                ui.checkbox(&mut gizmo_cfg.show_signal_zones, "Show signal strength zones");
                 ui.checkbox(&mut gizmo_cfg.show_center_dot, "Show center dot");
                 if gizmo_cfg.show_center_dot {
                     ui.add(egui::Slider::new(&mut gizmo_cfg.center_dot_size, 50.0..=500.0)
@@ -270,8 +258,7 @@ pub fn ui_example_system(
                                         tle: None,
                                         propagator: None,
                                         error: None,
-                                        coverage_params: None,
-                                        show_footprint: false,
+                                        show_ground_track: false,
                                         show_trail: false,
                                     });
                                     // Immediately send fetch request to background worker via injected resource
@@ -320,17 +307,17 @@ pub fn ui_example_system(
                     .filter(|s| s.propagator.is_some())
                     .collect();
             
-                let all_coverage_enabled = !ready_satellites.is_empty() &&
-                    ready_satellites.iter().all(|s| s.show_footprint);
+                let all_ground_tracks_enabled = !ready_satellites.is_empty() &&
+                    ready_satellites.iter().all(|s| s.show_ground_track);
                 let all_trails_enabled = !ready_satellites.is_empty() &&
                     ready_satellites.iter().all(|s| s.show_trail);
             
-                // Master coverage checkbox
-                let mut master_coverage = all_coverage_enabled;
-                if ui.checkbox(&mut master_coverage, "All Coverage").changed() {
+                // Master ground track checkbox
+                let mut master_ground_track = all_ground_tracks_enabled;
+                if ui.checkbox(&mut master_ground_track, "All Tracks").changed() {
                     for entry in store.items.values_mut() {
                         if entry.propagator.is_some() {
-                            entry.show_footprint = master_coverage;
+                            entry.show_ground_track = master_ground_track;
                         }
                     }
                 }
@@ -397,7 +384,7 @@ pub fn ui_example_system(
                         .column(Column::exact(50.0)) // NORAD ID
                         .column(Column::remainder().at_least(80.0)) // Name
                         .column(Column::exact(60.0)) // Status
-                        .column(Column::exact(50.0)) // Coverage
+                        .column(Column::exact(50.0)) // Ground Track
                         .column(Column::exact(50.0)) // Trail
                         .column(Column::exact(50.0)) // Actions
                         .header(20.0, |mut header| {
@@ -411,7 +398,7 @@ pub fn ui_example_system(
                                 ui.strong("Status");
                             });
                             header.col(|ui| {
-                                ui.strong("Cov");
+                                ui.strong("Track");
                             });
                             header.col(|ui| {
                                 ui.strong("Trail");
@@ -425,10 +412,10 @@ pub fn ui_example_system(
                                 // Use immutable access for display, collect changes to apply later
                                 if let Some(s) = store.items.get(&norad) {
                                     let mut remove = false;
-                                    let mut show_footprint = s.show_footprint;
+                                    let mut show_ground_track = s.show_ground_track;
                                     let mut show_trail = s.show_trail;
                                     let has_propagator = s.propagator.is_some();
-                                    let old_footprint = s.show_footprint;
+                                    let old_ground_track = s.show_ground_track;
                                     let old_trail = s.show_trail;
                                     
                                     body.row(18.0, |mut row| {
@@ -477,10 +464,10 @@ pub fn ui_example_system(
                                             ui.colored_label(status_color, status_text);
                                         });
                                         
-                                        // Coverage checkbox column
+                                        // Ground Track checkbox column
                                         row.col(|ui| {
                                             if has_propagator {
-                                                ui.checkbox(&mut show_footprint, "");
+                                                ui.checkbox(&mut show_ground_track, "");
                                             } else {
                                                 ui.add_enabled(false, egui::Checkbox::new(&mut false, ""));
                                             }
@@ -506,10 +493,10 @@ pub fn ui_example_system(
                                     // Apply changes after releasing immutable borrow
                                     let _ = s;
                                     
-                                    // Update show_footprint if changed
-                                    if has_propagator && show_footprint != old_footprint {
+                                    // Update show_ground_track if changed
+                                    if has_propagator && show_ground_track != old_ground_track {
                                         if let Some(s_mut) = store.items.get_mut(&norad) {
-                                            s_mut.show_footprint = show_footprint;
+                                            s_mut.show_ground_track = show_ground_track;
                                         }
                                     }
                                     // Update show_trail if changed

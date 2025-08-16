@@ -1,6 +1,5 @@
 //! Satellite resources for managing satellite data
 
-use crate::coverage::CoverageParameters;
 use crate::tle::TleData;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -33,11 +32,8 @@ pub struct SatEntry {
     pub propagator: Option<sgp4::Constants>,
     /// Last error message if any
     pub error: Option<String>,
-    /// Coverage footprint parameters
-    #[allow(dead_code)]
-    pub coverage_params: Option<CoverageParameters>,
-    /// Whether to show footprint for this satellite
-    pub show_footprint: bool,
+    /// Whether to show ground track for this satellite
+    pub show_ground_track: bool,
     /// Whether to show orbit trail for this satellite
     pub show_trail: bool,
 }
