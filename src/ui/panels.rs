@@ -27,7 +27,6 @@ fn bevy_to_egui_color(color: Color) -> Color32 {
 
 pub fn render_left_panel(
     ui: &mut egui::Ui,
-    state: &mut UIState,
     arrows_cfg: &mut ArrowConfig,
     sim_time: &mut SimulationTime,
 ) {
@@ -38,7 +37,7 @@ pub fn render_left_panel(
     // ui.checkbox(&mut state.show_axes, "Show axes");
 
     ui.separator();
-    ui.heading("Simulation time");
+    ui.heading("Speedup time");
     ui.horizontal(|ui| {
         ui.label("Scale:");
         ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
@@ -142,7 +141,6 @@ pub fn render_right_panel(
 
             // Send group fetch command
             if let Some(fetch) = fetch_channels {
-                println!("[REQUEST] sending group fetch for group={}", group);
                 if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
                     eprintln!("[REQUEST] failed to send group fetch: {}", e);
                     right_ui.error = Some(format!("Failed to request group: {}", e));
@@ -215,7 +213,6 @@ pub fn render_right_panel(
                             );
                             // Immediately send fetch request to background worker via injected resource
                             if let Some(fetch) = fetch_channels {
-                                println!("[REQUEST] sending fetch for norad={}", norad);
                                 if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
                                     eprintln!(
                                         "[REQUEST] failed to send fetch for norad={}: {}",

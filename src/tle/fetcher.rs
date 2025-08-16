@@ -83,23 +83,10 @@ pub fn start_tle_worker() -> FetchChannels {
                                 .await?;
                             let status = resp.status();
                             let body = resp.text().await?;
-                            // Debug log full fetch result (status, first lines, and any extracted tuple)
-                            println!(
-                                "[TLE FETCH] norad={} status={} url={} bytes={}...",
-                                norad,
-                                status,
-                                url,
-                                body.len()
-                            );
+
                             // Attempt parse even if not 2xx, to capture HTML/text bodies for debugging
                             let (name, l1, l2) = extract_tle_block(&body, norad)?;
-                            println!(
-                                "[TLE PARSED] norad={} name={}\\n{}\\n{}",
-                                norad,
-                                name.clone().unwrap_or_else(|| "None".into()),
-                                l1,
-                                l2
-                            );
+
                             // If HTTP not success, still bail after logging to surface error to UI
                             if !status.is_success() {
                                 anyhow::bail!("HTTP {} after parse", status);
@@ -148,13 +135,7 @@ pub fn start_tle_worker() -> FetchChannels {
                                 .await?;
                             let status = resp.status();
                             let body = resp.text().await?;
-                            println!(
-                                "[TLE GROUP FETCH] group={} status={} url={} bytes={}...",
-                                group,
-                                status,
-                                url,
-                                body.len()
-                            );
+
                             if !status.is_success() {
                                 anyhow::bail!("HTTP {} for group fetch", status);
                             }

@@ -60,12 +60,7 @@ pub fn ui_system(
         left = egui::SidePanel::left("left_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_left_panel(
-                    ui,
-                    &mut state,
-                    &mut arrows_cfg,
-                    &mut sim_time,
-                );
+                render_left_panel(ui, &mut arrows_cfg, &mut sim_time);
             })
             .response
             .rect

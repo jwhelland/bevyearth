@@ -25,7 +25,6 @@ pub fn process_fetch_results_system(
                 line2,
                 epoch_utc,
             } => {
-                println!("[TLE DISPATCH] received SUCCESS for norad={}", norad);
                 if let Some(s) = store.items.get_mut(&norad) {
                     // clear previous error
                     s.error = None;
@@ -46,7 +45,6 @@ pub fn process_fetch_results_system(
                         Ok(elements) => match sgp4::Constants::from_elements(&elements) {
                             Ok(constants) => {
                                 s.propagator = Some(constants);
-                                println!("[SGP4] norad={} constants initialized", norad);
                             }
                             Err(e) => {
                                 s.propagator = None;
@@ -100,14 +98,12 @@ pub fn process_fetch_results_system(
                         show_trail: false,
                     };
                     store.items.insert(norad, entry);
-                    println!("[TLE DISPATCH] Created new SatEntry for norad={}", norad);
                 }
 
                 // If we were loading a group, we can reset the loading state after processing results
                 // This is a simple heuristic - in a more complex system you might track group loading more precisely
                 if right_ui.group_loading {
                     right_ui.group_loading = false;
-                    println!("[GROUP LOADING] Group loading completed");
                 }
             }
             FetchResultMsg::Failure { norad, error } => {
