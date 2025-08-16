@@ -96,6 +96,7 @@ pub fn process_fetch_results_system(
                         error: None,
                         show_ground_track: false,
                         show_trail: false,
+                        is_clicked: false,
                     };
                     store.items.insert(norad, entry);
                 }

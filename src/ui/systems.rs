@@ -11,7 +11,8 @@ use crate::orbital::SimulationTime;
 use crate::satellite::{OrbitTrailConfig, SatelliteStore, SelectedSatellite};
 use crate::tle::FetchChannels;
 use crate::ui::panels::{
-    render_bottom_panel, render_left_panel, render_right_panel, render_top_panel,
+    render_bottom_panel_with_clicked_satellite, render_left_panel, render_right_panel,
+    render_top_panel,
 };
 use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::ArrowConfig;
@@ -108,7 +109,7 @@ pub fn ui_system(
         bottom = egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_bottom_panel(ui, &store, &fetch_channels);
+                render_bottom_panel_with_clicked_satellite(ui, &store, &fetch_channels);
             })
             .response
             .rect

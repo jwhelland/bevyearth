@@ -209,6 +209,7 @@ pub fn render_right_panel(
                                     error: None,
                                     show_ground_track: false,
                                     show_trail: false,
+                                    is_clicked: false,
                                 },
                             );
                             // Immediately send fetch request to background worker via injected resource
@@ -377,6 +378,8 @@ pub fn render_right_panel(
 
         ui.separator();
     });
+
+    ui.separator();
 
     // Satellite table view
     let mut to_remove: Option<u32> = None;
@@ -604,14 +607,12 @@ pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &Simul
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
 
-pub fn render_bottom_panel(
+pub fn render_bottom_panel_with_clicked_satellite(
     ui: &mut egui::Ui,
     store: &SatelliteStore,
     fetch_channels: &Option<Res<FetchChannels>>,
 ) {
     ui.horizontal(|ui| {
-        ui.label("Debug Info:");
-        ui.separator();
         ui.label(format!("Satellites: {}", store.items.len()));
         if let Some(_fetch) = fetch_channels {
             ui.separator();
@@ -619,6 +620,18 @@ pub fn render_bottom_panel(
         } else {
             ui.separator();
             ui.colored_label(Color32::RED, "TLE Fetcher: Inactive");
+        }
+
+        // Display clicked satellite information by finding it in the store
+        ui.separator();
+        if let Some((norad, entry)) = store.items.iter().find(|(_, entry)| entry.is_clicked) {
+            let satellite_name = entry.name.as_deref().unwrap_or("Unnamed");
+            ui.colored_label(
+                bevy_to_egui_color(entry.color),
+                format!("Selected: {} (NORAD: {})", satellite_name, norad),
+            );
+        } else {
+            ui.colored_label(Color32::GRAY, "Selected: None");
         }
     });
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());

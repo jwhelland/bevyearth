@@ -5,6 +5,8 @@ use crate::orbital::{SimulationTime, eci_to_ecef_km, gmst_rad, minutes_since_epo
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
 use crate::satellite::resources::{OrbitTrailConfig, SatEcef, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
+use bevy::picking::events::Click;
+use bevy::picking::events::Pointer;
 use bevy::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
 
@@ -355,6 +357,40 @@ pub fn track_satellite_continuously(
                         cam_transform.look_at(Vec3::ZERO, Vec3::Y);
                     }
                 }
+            }
+        }
+    }
+}
+
+/// System to handle satellite click events and update the clicked satellite in the store
+pub fn satellite_click_system(
+    mut store: ResMut<SatelliteStore>,
+    mut click_events: EventReader<Pointer<Click>>,
+    satellite_query: Query<Entity, With<Satellite>>,
+) {
+    for event in click_events.read() {
+        let clicked_entity = event.target;
+
+        // Check if the clicked entity is a satellite
+        if satellite_query.contains(clicked_entity) {
+            // First, clear the clicked status from all satellites
+            for entry in store.items.values_mut() {
+                entry.is_clicked = false;
+            }
+
+            // Find the corresponding satellite entry by entity and mark it as clicked
+            if let Some((norad, entry)) = store
+                .items
+                .iter_mut()
+                .find(|(_, entry)| entry.entity == Some(clicked_entity))
+            {
+                entry.is_clicked = true;
+
+                info!(
+                    "Clicked satellite: {} (NORAD: {})",
+                    entry.name.as_deref().unwrap_or("Unnamed"),
+                    norad
+                );
             }
         }
     }
