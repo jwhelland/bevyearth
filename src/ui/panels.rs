@@ -90,7 +90,9 @@ pub fn render_right_panel(
     ui.heading("Satellites");
     ui.separator();
 
-    ui.collapsing("Satellite Groups", |ui| {
+    egui::CollapsingHeader::new("Satellite Groups")
+        .default_open(true)
+        .show(ui, |ui| {
         ui.separator();
 
         // Group selection dropdown
@@ -324,10 +326,8 @@ pub fn render_right_panel(
     ui.collapsing("Orbit Trail Settings", |ui| {
         ui.separator();
 
-        ui.add(egui::Slider::new(&mut trail_cfg.max_points, 10..=500).text("History points"));
         ui.add(
-            egui::Slider::new(&mut trail_cfg.max_age_seconds, 60.0..=1800.0)
-                .text("Max age (seconds)"),
+            egui::Slider::new(&mut trail_cfg.max_points, 100..=10000).text("Max history points"),
         );
         ui.add(
             egui::Slider::new(&mut trail_cfg.update_interval_seconds, 0.5..=10.0)
