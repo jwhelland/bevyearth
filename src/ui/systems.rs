@@ -64,9 +64,6 @@ pub fn ui_system(
                     ui,
                     &mut state,
                     &mut arrows_cfg,
-                    &mut ground_track_cfg,
-                    &mut gizmo_cfg,
-                    &mut trail_cfg,
                     &mut sim_time,
                 );
             })
@@ -88,6 +85,9 @@ pub fn ui_system(
                     &mut meshes,
                     &mut materials,
                     &mut selected_sat,
+                    &mut ground_track_cfg,
+                    &mut gizmo_cfg,
+                    &mut trail_cfg,
                     &fetch_channels,
                 );
             })
