@@ -127,16 +127,7 @@ pub fn update_orbit_trails_system(
                 });
             }
 
-            // Remove old trail points based on age and count limits (use global config)
-            let max_age_millis = (trail_config.max_age_seconds * 1000.0) as i64;
-            trail.history.retain(|point| {
-                current_time
-                    .signed_duration_since(point.timestamp)
-                    .num_milliseconds()
-                    <= max_age_millis
-            });
-
-            // Limit number of points (use global config)
+            // Limit number of points to max 1000
             if trail.history.len() > trail_config.max_points {
                 let excess = trail.history.len() - trail_config.max_points;
                 trail.history.drain(0..excess);
@@ -160,12 +151,9 @@ pub fn update_orbit_trails_system(
 /// System to draw orbit trails using gizmos
 pub fn draw_orbit_trails_system(
     store: Res<SatelliteStore>,
-    trail_config: Res<OrbitTrailConfig>,
     trail_query: Query<(&OrbitTrail, Entity), With<Satellite>>,
     mut gizmos: Gizmos,
-    sim_time: Res<SimulationTime>,
 ) {
-    let current_time = sim_time.current_utc;
 
     for (trail, entity) in trail_query.iter() {
         // Find the satellite entry for this entity to get color and settings
@@ -181,14 +169,10 @@ pub fn draw_orbit_trails_system(
                 let point1 = &window[0];
                 let point2 = &window[1];
 
-                // Calculate alpha based on age of the older point (use global config)
-                let age_seconds = current_time
-                    .signed_duration_since(point1.timestamp)
-                    .num_milliseconds() as f32
-                    / 1000.0;
-                let alpha = (1.0 - (age_seconds / trail_config.max_age_seconds))
-                    .max(0.1)
-                    .min(1.0);
+                // Calculate alpha based on position in trail (newer = more opaque)
+                let trail_position = trail.history.iter().position(|p| std::ptr::eq(p, point1)).unwrap_or(0) as f32;
+                let trail_length = trail.history.len() as f32;
+                let alpha = (0.1 + 0.9 * (trail_position / trail_length.max(1.0))).min(1.0);
 
                 // Create color with fade
                 let trail_color = Color::srgba(
