@@ -439,9 +439,14 @@ pub fn ui_example_system(
                                             }
                                             
                                             if ui.add(button).clicked() {
-                                                // Set both selected (for one-time camera move) and tracking (for continuous follow)
-                                                selected_sat.selected = Some(s.norad);
-                                                selected_sat.tracking = Some(s.norad);
+                                                if selected_sat.tracking == Some(s.norad) {
+                                                    // Currently tracking this satellite, so untrack it
+                                                    selected_sat.tracking = None;
+                                                } else {
+                                                    // Not tracking this satellite, so start tracking it
+                                                    selected_sat.selected = Some(s.norad);
+                                                    selected_sat.tracking = Some(s.norad);
+                                                }
                                             }
                                         });
                                         
