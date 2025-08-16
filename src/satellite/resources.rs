@@ -36,6 +36,8 @@ pub struct SatEntry {
     pub show_ground_track: bool,
     /// Whether to show orbit trail for this satellite
     pub show_trail: bool,
+    /// Whether this satellite is currently clicked/selected for display
+    pub is_clicked: bool,
 }
 
 /// Resource for satellite ECEF position (in kilometers)

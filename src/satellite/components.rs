@@ -12,7 +12,7 @@ pub struct Satellite;
 pub struct SatelliteColor(pub Color);
 
 /// Component that stores orbit trail history for a satellite
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct OrbitTrail {
     /// Historical positions with timestamps
     pub history: Vec<TrailPoint>,
@@ -25,12 +25,4 @@ pub struct TrailPoint {
     pub position: Vec3,
     /// When this point was recorded
     pub timestamp: DateTime<Utc>,
-}
-
-impl Default for OrbitTrail {
-    fn default() -> Self {
-        Self {
-            history: Vec::new(),
-        }
-    }
 }
