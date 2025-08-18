@@ -1444,6 +1444,7 @@ name = "bevyearth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "approx",
  "bevy",
  "bevy_egui",
  "bevy_panorbit_camera",

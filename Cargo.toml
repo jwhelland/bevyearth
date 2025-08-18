@@ -22,6 +22,10 @@ anyhow = "1"
 glam = "0.27"
 egui_extras = "0.31"
 
+[dev-dependencies]
+approx = "0.5"
+# criterion = "0.5"
+
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
