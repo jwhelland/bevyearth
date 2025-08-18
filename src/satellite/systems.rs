@@ -1,19 +1,19 @@
 //! Satellite systems for propagation and position updates
 
 use crate::earth::EARTH_RADIUS_KM;
-use crate::orbital::{SimulationTime, eci_to_ecef_km, gmst_rad, minutes_since_epoch};
+use crate::orbital::{SimulationTime, Dut1, eci_to_ecef_km, ecef_to_bevy_world_km, gmst_rad_with_dut1, minutes_since_epoch};
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{OrbitTrailConfig, SatEcef, SatelliteStore, SelectedSatellite};
+use crate::satellite::resources::{OrbitTrailConfig, SatWorldKm, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
 use bevy::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
 
-/// System to update the satellite ECEF resource from satellite transforms
-pub fn update_satellite_ecef(
+/// System to update the satellite world-coordinate resource from satellite transforms
+pub fn update_satellite_world(
     sat_query: Query<&Transform, With<Satellite>>,
-    mut sat_res: ResMut<SatEcef>,
+    mut sat_res: ResMut<SatWorldKm>,
 ) {
     if let Some(t) = sat_query.iter().next() {
         sat_res.0 = t.translation;
@@ -24,9 +24,10 @@ pub fn update_satellite_ecef(
 pub fn propagate_satellites_system(
     store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
+    dut1: Res<Dut1>,
     mut q: Query<(&mut Transform, &mut SatelliteColor, Entity), With<Satellite>>,
 ) {
-    let gmst = gmst_rad(sim_time.current_utc);
+    let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
     for entry in store.items.values() {
         if let (Some(tle), Some(constants)) = (&entry.tle, &entry.propagator) {
             let mins = minutes_since_epoch(sim_time.current_utc, tle.epoch_utc);
@@ -35,7 +36,7 @@ pub fn propagate_satellites_system(
                 let pos = state.position; // [f64; 3] in km (TEME)
                 let eci = DVec3::new(pos[0], pos[1], pos[2]);
                 let ecef = eci_to_ecef_km(eci, gmst);
-                let bevy_pos = Vec3::new(ecef.y as f32, ecef.z as f32, ecef.x as f32);
+                let bevy_pos = ecef_to_bevy_world_km(ecef);
                 if let Some((mut t, mut c, _)) =
                     q.iter_mut().find(|(_, _, e)| Some(*e) == entry.entity)
                 {

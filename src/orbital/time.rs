@@ -32,6 +32,17 @@ pub fn advance_simulation_clock(time: Res<Time>, mut sim_time: ResMut<Simulation
     }
 }
 
+/// Resource for UT1-UTC (DUT1) seconds used in GMST computation.
+/// Defaults to 0.0 which is acceptable for visualization.
+#[derive(Resource, Deref, DerefMut)]
+pub struct Dut1(pub f64);
+
+impl Default for Dut1 {
+    fn default() -> Self {
+        Self(0.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
