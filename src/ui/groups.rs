@@ -16,7 +16,6 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     ("goes", "GOES Satellites"),
     ("gorizont", "Gorizont Satellites"),
     ("gps-ops", "GPS Operational Satellites"),
-    ("inmarsat", "Inmarsat Satellites"),
     ("intelsat", "Intelsat Satellites"),
     ("iridium-NEXT", "Iridium NEXT Satellites"),
     ("iridium", "Iridium Satellites"),
