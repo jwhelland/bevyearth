@@ -8,7 +8,7 @@ use bevy_egui::{EguiContexts, egui};
 use crate::ground_track::GroundTrackConfig;
 use crate::ground_track_gizmo::GroundTrackGizmoConfig;
 use crate::orbital::SimulationTime;
-use crate::satellite::{OrbitTrailConfig, SatelliteStore, SelectedSatellite};
+use crate::satellite::{OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite};
 use crate::tle::FetchChannels;
 use crate::ui::panels::{
     render_bottom_panel_with_clicked_satellite, render_left_panel, render_right_panel,
@@ -16,6 +16,26 @@ use crate::ui::panels::{
 };
 use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::ArrowConfig;
+
+/// Configuration bundle to reduce parameter count
+#[derive(Resource)]
+pub struct UiConfigBundle {
+    pub ground_track_cfg: GroundTrackConfig,
+    pub gizmo_cfg: GroundTrackGizmoConfig,
+    pub trail_cfg: OrbitTrailConfig,
+    pub render_cfg: SatelliteRenderConfig,
+}
+
+impl Default for UiConfigBundle {
+    fn default() -> Self {
+        Self {
+            ground_track_cfg: GroundTrackConfig::default(),
+            gizmo_cfg: GroundTrackGizmoConfig::default(),
+            trail_cfg: OrbitTrailConfig::default(),
+            render_cfg: SatelliteRenderConfig::default(),
+        }
+    }
+}
 
 /// Main UI system that renders all the egui panels
 #[allow(clippy::too_many_arguments)]
@@ -25,9 +45,7 @@ pub fn ui_system(
     window: Single<&mut Window, With<PrimaryWindow>>,
     mut state: ResMut<UIState>,
     mut arrows_cfg: ResMut<ArrowConfig>,
-    mut ground_track_cfg: ResMut<GroundTrackConfig>,
-    mut gizmo_cfg: ResMut<GroundTrackGizmoConfig>,
-    mut trail_cfg: ResMut<OrbitTrailConfig>,
+    mut config_bundle: ResMut<UiConfigBundle>,
     mut sim_time: ResMut<SimulationTime>,
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
@@ -81,9 +99,7 @@ pub fn ui_system(
                     &mut meshes,
                     &mut materials,
                     &mut selected_sat,
-                    &mut ground_track_cfg,
-                    &mut gizmo_cfg,
-                    &mut trail_cfg,
+                    &mut config_bundle,
                     &fetch_channels,
                 );
             })

@@ -3,7 +3,7 @@
 use crate::earth::EARTH_RADIUS_KM;
 use crate::orbital::{SimulationTime, Dut1, eci_to_ecef_km, ecef_to_bevy_world_km, gmst_rad_with_dut1, minutes_since_epoch};
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{OrbitTrailConfig, SatWorldKm, SatelliteStore, SelectedSatellite};
+use crate::satellite::resources::{SatWorldKm, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -54,6 +54,7 @@ pub fn spawn_missing_satellite_entities_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
 ) {
     let mut satellites_to_spawn = Vec::new();
 
@@ -67,18 +68,19 @@ pub fn spawn_missing_satellite_entities_system(
     // Spawn entities for satellites that need them
     for norad in satellites_to_spawn {
         if let Some(entry) = store.items.get_mut(&norad) {
-            let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
+            let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
             let entity = commands
                 .spawn((
                     Mesh3d(meshes.add(mesh)),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         // base_color: entry.color,
-                        emissive: entry.color.to_linear() * 20.0,
+                        emissive: entry.color.to_linear() * config_bundle.render_cfg.emissive_intensity,
                         ..Default::default()
                     })),
                     Satellite,
                     SatelliteColor(entry.color),
-                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
+                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
+                        .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
                 ))
                 .id();
             entry.entity = Some(entity);
@@ -90,7 +92,7 @@ pub fn spawn_missing_satellite_entities_system(
 pub fn update_orbit_trails_system(
     store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
-    trail_config: Res<OrbitTrailConfig>,
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     mut trail_query: Query<(&mut OrbitTrail, &Transform, Entity), With<Satellite>>,
     mut commands: Commands,
 ) {
@@ -116,7 +118,7 @@ pub fn update_orbit_trails_system(
                             .signed_duration_since(last.timestamp)
                             .num_milliseconds() as f32
                             / 1000.0
-                            >= trail_config.update_interval_seconds
+                            >= config_bundle.trail_cfg.update_interval_seconds
                     })
                     .unwrap_or(true);
 
@@ -129,8 +131,8 @@ pub fn update_orbit_trails_system(
             }
 
             // Limit number of points to max 1000
-            if trail.history.len() > trail_config.max_points {
-                let excess = trail.history.len() - trail_config.max_points;
+            if trail.history.len() > config_bundle.trail_cfg.max_points {
+                let excess = trail.history.len() - config_bundle.trail_cfg.max_points;
                 trail.history.drain(0..excess);
             }
         }
@@ -376,6 +378,32 @@ pub fn satellite_click_system(
                     entry.name.as_deref().unwrap_or("Unnamed"),
                     norad
                 );
+            }
+        }
+    }
+}
+
+/// System to update satellite rendering properties when config changes
+pub fn update_satellite_rendering_system(
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
+    _store: Res<SatelliteStore>,
+    mut satellite_query: Query<(&mut Transform, &SatelliteColor, Entity), With<Satellite>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    material_query: Query<&MeshMaterial3d<StandardMaterial>>,
+) {
+    // Only update if the config has changed
+    if !config_bundle.is_changed() {
+        return;
+    }
+
+    for (mut transform, satellite_color, entity) in satellite_query.iter_mut() {
+        // Update scale based on sphere_radius
+        transform.scale = Vec3::splat(config_bundle.render_cfg.sphere_radius);
+
+        // Update material emissive intensity
+        if let Ok(material_handle) = material_query.get(entity) {
+            if let Some(material) = materials.get_mut(&material_handle.0) {
+                material.emissive = satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
             }
         }
     }

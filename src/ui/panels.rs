@@ -4,11 +4,9 @@ use bevy_egui::egui::{self, Color32};
 use chrono::SecondsFormat;
 
 use crate::earth::EARTH_RADIUS_KM;
-use crate::ground_track::GroundTrackConfig;
-use crate::ground_track_gizmo::GroundTrackGizmoConfig;
 use crate::orbital::SimulationTime;
 use crate::satellite::{
-    OrbitTrailConfig, SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite,
+    SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite,
 };
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
@@ -82,9 +80,7 @@ pub fn render_right_panel(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     selected_sat: &mut SelectedSatellite,
-    ground_track_cfg: &mut GroundTrackConfig,
-    gizmo_cfg: &mut GroundTrackGizmoConfig,
-    trail_cfg: &mut OrbitTrailConfig,
+    config_bundle: &mut crate::ui::systems::UiConfigBundle,
     fetch_channels: &Option<Res<FetchChannels>>,
 ) {
     ui.heading("Satellites");
@@ -185,18 +181,19 @@ pub fn render_right_panel(
                             let color = Color::hsl(hue, sat, light);
 
                             // spawn entity placeholder
-                            let mesh = Sphere::new(100.0).mesh().ico(4).unwrap();
+                            let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
                             let entity = commands
                                 .spawn((
                                     Mesh3d(meshes.add(mesh)),
                                     MeshMaterial3d(materials.add(StandardMaterial {
                                         // base_color: color,
-                                        emissive: color.to_linear() * 20.0,
+                                        emissive: color.to_linear() * config_bundle.render_cfg.emissive_intensity,
                                         ..Default::default()
                                     })),
                                     Satellite,
                                     SatelliteColor(color),
-                                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0),
+                                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
+                                        .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
                                 ))
                                 .id();
                             store.items.insert(
@@ -300,21 +297,21 @@ pub fn render_right_panel(
     ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
-        ui.checkbox(&mut ground_track_cfg.enabled, "Show ground tracks");
+        ui.checkbox(&mut config_bundle.ground_track_cfg.enabled, "Show ground tracks");
         ui.add(
-            egui::Slider::new(&mut ground_track_cfg.radius_km, 10.0..=500.0)
+            egui::Slider::new(&mut config_bundle.ground_track_cfg.radius_km, 10.0..=500.0)
                 .text("Track radius (km)"),
         );
 
         ui.collapsing("Gizmo Settings", |ui| {
-            ui.checkbox(&mut gizmo_cfg.enabled, "Use gizmo circles (recommended)");
+            ui.checkbox(&mut config_bundle.gizmo_cfg.enabled, "Use gizmo circles (recommended)");
             ui.add(
-                egui::Slider::new(&mut gizmo_cfg.circle_segments, 16..=128).text("Circle segments"),
+                egui::Slider::new(&mut config_bundle.gizmo_cfg.circle_segments, 16..=128).text("Circle segments"),
             );
-            ui.checkbox(&mut gizmo_cfg.show_center_dot, "Show center dot");
-            if gizmo_cfg.show_center_dot {
+            ui.checkbox(&mut config_bundle.gizmo_cfg.show_center_dot, "Show center dot");
+            if config_bundle.gizmo_cfg.show_center_dot {
                 ui.add(
-                    egui::Slider::new(&mut gizmo_cfg.center_dot_size, 50.0..=500.0)
+                    egui::Slider::new(&mut config_bundle.gizmo_cfg.center_dot_size, 50.0..=500.0)
                         .text("Center dot size (km)"),
                 );
             }
@@ -327,11 +324,26 @@ pub fn render_right_panel(
         ui.separator();
 
         ui.add(
-            egui::Slider::new(&mut trail_cfg.max_points, 100..=10000).text("Max history points"),
+            egui::Slider::new(&mut config_bundle.trail_cfg.max_points, 100..=10000).text("Max history points"),
         );
         ui.add(
-            egui::Slider::new(&mut trail_cfg.update_interval_seconds, 0.5..=10.0)
+            egui::Slider::new(&mut config_bundle.trail_cfg.update_interval_seconds, 0.5..=10.0)
                 .text("Update interval (seconds)"),
+        );
+
+        ui.separator();
+    });
+
+    ui.collapsing("Satellite Rendering", |ui| {
+        ui.separator();
+
+        ui.add(
+            egui::Slider::new(&mut config_bundle.render_cfg.sphere_radius, 1.0..=200.0)
+                .text("Sphere size (km)"),
+        );
+        ui.add(
+            egui::Slider::new(&mut config_bundle.render_cfg.emissive_intensity, 10.0..=500.0)
+                .text("Emissive intensity"),
         );
 
         ui.separator();

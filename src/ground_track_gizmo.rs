@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use std::f32::consts::PI;
 
 use crate::earth::EARTH_RADIUS_KM;
-use crate::ground_track::GroundTrackConfig;
 use crate::satellite::{Satellite, SatelliteStore};
 
 /// Plugin for ground track gizmo rendering and management
@@ -15,7 +14,8 @@ pub struct GroundTrackGizmoPlugin;
 
 impl Plugin for GroundTrackGizmoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GroundTrackGizmoConfig>().add_systems(
+        // GroundTrackGizmoConfig is now initialized in UiConfigBundle
+        app.add_systems(
             Update,
             (
                 manage_ground_track_gizmo_components_system,
@@ -29,12 +29,11 @@ impl Plugin for GroundTrackGizmoPlugin {
 fn manage_ground_track_gizmo_components_system(
     mut commands: Commands,
     mut store: ResMut<SatelliteStore>,
-    ground_track_config: Res<GroundTrackConfig>,
-    gizmo_config: Res<GroundTrackGizmoConfig>,
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     satellite_query: Query<Entity, With<Satellite>>,
     gizmo_query: Query<Entity, With<GroundTrackGizmo>>,
 ) {
-    if !ground_track_config.enabled || !gizmo_config.enabled {
+    if !config_bundle.ground_track_cfg.enabled || !config_bundle.gizmo_cfg.enabled {
         // If ground tracks are globally disabled, remove all GroundTrackGizmo components
         for gizmo_entity in gizmo_query.iter() {
             commands.entity(gizmo_entity).remove::<GroundTrackGizmo>();
@@ -112,11 +111,10 @@ impl Default for GroundTrackGizmoConfig {
 /// System to draw ground track gizmos for satellites
 pub fn draw_ground_track_gizmos_system(
     mut gizmos: Gizmos,
-    config: Res<GroundTrackGizmoConfig>,
-    ground_track_config: Res<GroundTrackConfig>,
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     satellite_query: Query<(&Transform, &GroundTrackGizmo), With<Satellite>>,
 ) {
-    if !config.enabled || !ground_track_config.enabled {
+    if !config_bundle.gizmo_cfg.enabled || !config_bundle.ground_track_cfg.enabled {
         return;
     }
 
@@ -128,9 +126,9 @@ pub fn draw_ground_track_gizmos_system(
         let sat_pos = transform.translation;
         draw_satellite_ground_track_gizmo(
             &mut gizmos,
-            &config,
+            &config_bundle.gizmo_cfg,
             sat_pos,
-            ground_track_config.radius_km,
+            config_bundle.ground_track_cfg.radius_km,
         );
     }
 }

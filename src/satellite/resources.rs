@@ -84,3 +84,21 @@ impl Default for SelectedSatellite {
         }
     }
 }
+
+/// Resource for configuring satellite rendering properties
+#[derive(Resource)]
+pub struct SatelliteRenderConfig {
+    /// Radius of satellite spheres in kilometers
+    pub sphere_radius: f32,
+    /// Emissive intensity multiplier for satellite materials
+    pub emissive_intensity: f32,
+}
+
+impl Default for SatelliteRenderConfig {
+    fn default() -> Self {
+        Self {
+            sphere_radius: 100.0,
+            emissive_intensity: 20.0,
+        }
+    }
+}

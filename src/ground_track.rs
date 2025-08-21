@@ -5,8 +5,8 @@ use bevy::prelude::*;
 pub struct GroundTrackPlugin;
 
 impl Plugin for GroundTrackPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<GroundTrackConfig>();
+    fn build(&self, _app: &mut App) {
+        // GroundTrackConfig is now initialized in UiConfigBundle
     }
 }
 

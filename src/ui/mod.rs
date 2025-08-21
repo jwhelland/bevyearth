@@ -14,7 +14,7 @@ pub mod systems;
 
 pub use skybox::SkyboxPlugin;
 pub use state::{RightPanelUI, UIState};
-pub use systems::ui_system;
+pub use systems::{ui_system, UiConfigBundle};
 
 /// Plugin for user interface management
 pub struct UiPlugin;
@@ -23,6 +23,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UIState>()
             .init_resource::<RightPanelUI>()
+            .init_resource::<UiConfigBundle>()
             .add_systems(EguiPrimaryContextPass, ui_system);
     }
 }
