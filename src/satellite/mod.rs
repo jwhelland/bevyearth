@@ -10,7 +10,10 @@ pub mod resources;
 pub mod systems;
 
 pub use components::{Satellite, SatelliteColor};
-pub use resources::{OrbitTrailConfig, SatWorldKm, SatEntry, SatelliteRenderConfig, SatelliteStore, SelectedSatellite};
+pub use resources::{
+    OrbitTrailConfig, SatEntry, SatWorldKm, SatelliteRenderConfig, SatelliteStore,
+    SelectedSatellite,
+};
 pub use systems::{
     draw_orbit_trails_system, move_camera_to_satellite, propagate_satellites_system,
     satellite_click_system, spawn_missing_satellite_entities_system, track_satellite_continuously,

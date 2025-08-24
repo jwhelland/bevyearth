@@ -7,11 +7,19 @@ use bevy::prelude::*;
 
 pub mod arrows;
 pub mod axes;
+pub mod cities;
 pub mod config;
+pub mod earth;
+pub mod ground_track;
+pub mod ground_track_gizmo;
 
 pub use arrows::draw_city_to_satellite_arrows;
 pub use axes::{ShowAxes, draw_axes};
+pub use cities::{CitiesEcef, CitiesPlugin};
 pub use config::ArrowConfig;
+pub use earth::EarthPlugin;
+pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
+pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
 
 /// Plugin for visualization systems
 pub struct VisualizationPlugin;

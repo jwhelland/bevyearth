@@ -5,10 +5,10 @@ use bevy::render::camera::Viewport;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
 
-use crate::ground_track::GroundTrackConfig;
-use crate::ground_track_gizmo::GroundTrackGizmoConfig;
 use crate::orbital::SimulationTime;
-use crate::satellite::{OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite};
+use crate::satellite::{
+    OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
+};
 use crate::tle::FetchChannels;
 use crate::ui::panels::{
     render_bottom_panel_with_clicked_satellite, render_left_panel, render_right_panel,
@@ -16,6 +16,8 @@ use crate::ui::panels::{
 };
 use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::ArrowConfig;
+use crate::visualization::GroundTrackConfig;
+use crate::visualization::GroundTrackGizmoConfig;
 
 /// Configuration bundle to reduce parameter count
 #[derive(Resource)]

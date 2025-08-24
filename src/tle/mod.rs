@@ -6,10 +6,10 @@
 use bevy::prelude::*;
 
 pub mod fetcher;
+pub mod mock_data;
 pub mod parser;
 pub mod systems;
 pub mod types;
-pub mod mock_data;
 
 pub use fetcher::start_tle_worker;
 pub use systems::process_fetch_results_system;

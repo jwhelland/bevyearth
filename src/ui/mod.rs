@@ -14,7 +14,7 @@ pub mod systems;
 
 pub use skybox::SkyboxPlugin;
 pub use state::{RightPanelUI, UIState};
-pub use systems::{ui_system, UiConfigBundle};
+pub use systems::{UiConfigBundle, ui_system};
 
 /// Plugin for user interface management
 pub struct UiPlugin;

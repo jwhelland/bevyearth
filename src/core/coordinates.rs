@@ -9,38 +9,45 @@
 //! - Legacy paths via crate::coord and crate::orbital::coordinates are temporarily re-exported as shims.
 
 use bevy::math::{DVec3, Vec3};
-use chrono::{DateTime, Utc, Datelike, Timelike};
-use std::f32::consts::PI;
+use chrono::{DateTime, Datelike, Timelike, Utc};
+use std::f64::consts::PI;
 
-use crate::earth::EARTH_RADIUS_KM;
+pub const EARTH_RADIUS_KM: f32 = 6371.0;
 
 // ========================= Geographic coordinates and helpers =========================
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct CoordError {
     pub msg: String,
 }
 
 #[derive(Debug)]
 pub struct Coordinates {
-    // Stored internally in radians (because math)
-    pub latitude: f32,
-    pub longitude: f32,
+    // Stored internally in radians (f64 for precision)
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 impl From<Vec3> for Coordinates {
     fn from(value: Vec3) -> Self {
-        let normalized_point = value.normalize();
-        let latitude = normalized_point.y.asin();
-        let longitude = normalized_point.x.atan2(normalized_point.z);
-        Coordinates { latitude, longitude }
+        let n = value.normalize();
+        let y = n.y as f64;
+        let x = n.x as f64;
+        let z = n.z as f64;
+        let latitude = y.asin();
+        let longitude = x.atan2(z);
+        Coordinates {
+            latitude,
+            longitude,
+        }
     }
 }
 
 impl Coordinates {
     pub fn as_degrees(&self) -> (f32, f32) {
-        let latitude = self.latitude * (180.0 / PI);
-        let longitude = self.longitude * (180.0 / PI);
+        let latitude = (self.latitude * (180.0_f64 / PI)) as f32;
+        let longitude = (self.longitude * (180.0_f64 / PI)) as f32;
         (latitude, longitude)
     }
 
@@ -63,15 +70,18 @@ impl Coordinates {
                 msg: format!("Invalid longitude: {:?}", longitude),
             });
         }
-        let latitude = latitude / (180.0 / PI);
-        let longitude = longitude / (180.0 / PI);
-        Ok(Coordinates { latitude, longitude })
+        let latitude = (latitude as f64) / (180.0_f64 / PI);
+        let longitude = (longitude as f64) / (180.0_f64 / PI);
+        Ok(Coordinates {
+            latitude,
+            longitude,
+        })
     }
 
     pub fn get_point_on_sphere(&self) -> Vec3 {
         // Compute with f64 for pole precision, then cast to f32 (Bevy uses f32)
-        let lat = self.latitude as f64;
-        let lon = self.longitude as f64;
+        let lat = self.latitude;
+        let lon = self.longitude;
         let y = lat.sin();
         let mut r = lat.cos();
         // Clamp residual radius near the poles to avoid mm-scale artifacts from f32 quantization of 90°
@@ -84,14 +94,24 @@ impl Coordinates {
     }
 }
 
-// Maps a value from one range to another
-fn map((in_min, in_max): (f32, f32), (out_min, out_max): (f32, f32), value: f32) -> f32 {
+// High-precision map helper
+fn map64((in_min, in_max): (f64, f64), (out_min, out_max): (f64, f64), value: f64) -> f64 {
     let denom = in_max - in_min;
-    if denom.abs() < f32::EPSILON {
+    if denom.abs() < f64::EPSILON {
         out_min
     } else {
         (value - in_min) / denom * (out_max - out_min) + out_min
     }
+}
+
+// Maps a value from one range to another (f32 API, f64 math)
+#[allow(dead_code)]
+fn map((in_min, in_max): (f32, f32), (out_min, out_max): (f32, f32), value: f32) -> f32 {
+    map64(
+        (in_min as f64, in_max as f64),
+        (out_min as f64, out_max as f64),
+        value as f64,
+    ) as f32
 }
 
 fn map_latitude(lat: f32) -> Result<f32, CoordError> {
@@ -103,11 +123,13 @@ fn map_latitude(lat: f32) -> Result<f32, CoordError> {
             msg: format!("Invalid latitude: {:?}", lat),
         });
     }
-    if (0.0..=90.0).contains(&lat) {
-        Ok(map((90.0, 0.0), (0.0, 0.5), lat))
+    let lat64 = lat as f64;
+    let v = if (0.0..=90.0).contains(&lat) {
+        map64((90.0, 0.0), (0.0, 0.5), lat64)
     } else {
-        Ok(map((0.0, -90.0), (0.5, 1.0), lat))
-    }
+        map64((0.0, -90.0), (0.5, 1.0), lat64)
+    };
+    Ok(v as f32)
 }
 
 fn map_longitude(lon: f32) -> Result<f32, CoordError> {
@@ -119,19 +141,30 @@ fn map_longitude(lon: f32) -> Result<f32, CoordError> {
             msg: format!("Invalid longitude: {:?}", lon),
         });
     }
-    if (-180.0..=0.0).contains(&lon) {
-        Ok(map((-180.0, 0.0), (0.0, 0.5), lon))
+    let lon64 = lon as f64;
+    let u = if (-180.0..=0.0).contains(&lon) {
+        map64((-180.0, 0.0), (0.0, 0.5), lon64)
     } else {
-        Ok(map((0.0, 180.0), (0.5, 1.0), lon))
-    }
+        map64((0.0, 180.0), (0.5, 1.0), lon64)
+    };
+    Ok(u as f32)
 }
 
 /// True if the straight segment from city (on/near sphere surface) to satellite does NOT intersect the Earth sphere.
 /// Uses a robust segment-sphere intersection test around the origin.
 pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
-    // Parametric segment P(t) = C + t*(S - C), t in [0,1]
-    let c = city_ecef_km;
-    let u = sat_ecef_km - city_ecef_km;
+    // Promote to f64 for numerical robustness
+    let c = DVec3::new(
+        city_ecef_km.x as f64,
+        city_ecef_km.y as f64,
+        city_ecef_km.z as f64,
+    );
+    let s = DVec3::new(
+        sat_ecef_km.x as f64,
+        sat_ecef_km.y as f64,
+        sat_ecef_km.z as f64,
+    );
+    let u = s - c;
 
     // Solve |C + t u|^2 = R^2  -> (u·u) t^2 + 2 (C·u) t + (C·C - R^2) = 0
     let a = u.length_squared();
@@ -139,10 +172,11 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
         // City and satellite at same point -> degenerate, treat as not visible
         return false;
     }
-    let b = 2.0 * c.dot(u);
-    let c_term = c.length_squared() - earth_radius_km * earth_radius_km;
+    let b = 2.0_f64 * c.dot(u);
+    let r2 = (earth_radius_km as f64) * (earth_radius_km as f64);
+    let c_term = c.length_squared() - r2;
 
-    let discr = b * b - 4.0 * a * c_term;
+    let discr = b * b - 4.0_f64 * a * c_term;
 
     if discr < 0.0 {
         // No intersection with infinite line => segment cannot hit sphere
@@ -150,11 +184,11 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
     }
 
     let sqrt_d = discr.sqrt();
-    let t1 = (-b - sqrt_d) / (2.0 * a);
-    let t2 = (-b + sqrt_d) / (2.0 * a);
+    let t1 = (-b - sqrt_d) / (2.0_f64 * a);
+    let t2 = (-b + sqrt_d) / (2.0_f64 * a);
 
     // Exclude grazing at the city endpoint: require t > eps (in km units).
-    let eps: f32 = 1e-5; // 1e-5 km = 1 cm
+    let eps: f64 = 1e-5_f64; // 1e-5 km = 1 cm
     // If either intersection parameter lies within (eps, 1], LOS is blocked.
     let hits_segment = ((t1 > eps) && (t1 <= 1.0)) || ((t2 > eps) && (t2 <= 1.0));
     !hits_segment
@@ -163,7 +197,17 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
 /// Cheap prefilter: city is potentially visible only if city and satellite are on the same hemisphere
 /// relative to the sphere origin. Equivalent to dot(C, S) > R^2 (both outside the tangent plane).
 pub fn hemisphere_prefilter(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
-    city_ecef_km.dot(sat_ecef_km) > earth_radius_km * earth_radius_km
+    let c = DVec3::new(
+        city_ecef_km.x as f64,
+        city_ecef_km.y as f64,
+        city_ecef_km.z as f64,
+    );
+    let s = DVec3::new(
+        sat_ecef_km.x as f64,
+        sat_ecef_km.y as f64,
+        sat_ecef_km.z as f64,
+    );
+    c.dot(s) > (earth_radius_km as f64) * (earth_radius_km as f64)
 }
 
 // ========================= Orbital/Earth-frame transformations =========================
@@ -206,10 +250,9 @@ pub fn gmst_rad(t: DateTime<Utc>) -> f64 {
     let t_cent = (jd - 2451545.0) / 36525.0; // Julian centuries from J2000.0
 
     // GMST in seconds (IAU 1982 with update terms). See Vallado and IERS Conventions.
-    let gmst_sec = 67310.54841
-        + (876600.0 * 3600.0 + 8640184.812866) * t_cent
-        + 0.093104 * t_cent * t_cent
-        - 6.2e-6 * t_cent * t_cent * t_cent;
+    let gmst_sec =
+        67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_cent + 0.093104 * t_cent * t_cent
+            - 6.2e-6 * t_cent * t_cent * t_cent;
 
     // Normalize to [0, 86400)
     let sec_in_day = 86400.0_f64;
@@ -237,10 +280,9 @@ pub fn gmst_rad_with_dut1(t: DateTime<Utc>, dut1_seconds: f64) -> f64 {
     let jd_ut1 = jd_utc + dut1_seconds / 86400.0_f64;
     let t_cent = (jd_ut1 - 2451545.0) / 36525.0; // Julian centuries from J2000.0
 
-    let gmst_sec = 67310.54841
-        + (876600.0 * 3600.0 + 8640184.812866) * t_cent
-        + 0.093104 * t_cent * t_cent
-        - 6.2e-6 * t_cent * t_cent * t_cent;
+    let gmst_sec =
+        67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_cent + 0.093104 * t_cent * t_cent
+            - 6.2e-6 * t_cent * t_cent * t_cent;
 
     let sec_in_day = 86400.0_f64;
     let mut s = gmst_sec % sec_in_day;
@@ -524,7 +566,11 @@ mod tests {
         let point_180 = coord_180.get_point_on_sphere();
         let point_minus_180 = coord_minus_180.get_point_on_sphere();
         let diff = (point_180 - point_minus_180).length();
-        assert!(diff < 0.01, "Points at ±180° should be very close, diff: {}", diff);
+        assert!(
+            diff < 0.01,
+            "Points at ±180° should be very close, diff: {}",
+            diff
+        );
     }
 
     #[test]
@@ -743,7 +789,11 @@ mod tests {
         let ecef_12h = eci_to_ecef_km(eci_12h, gmst_12h);
 
         let position_diff_12h = (ecef_0 - ecef_12h).length();
-        assert!(position_diff_12h < 1.0, "GEO changed by {} km after 12h", position_diff_12h);
+        assert!(
+            position_diff_12h < 1.0,
+            "GEO changed by {} km after 12h",
+            position_diff_12h
+        );
     }
 
     #[test]
@@ -902,13 +952,26 @@ mod tests {
         }
 
         let diff = (ecef_positions[0] - ecef_positions[8]).length();
-        assert!(diff < 1e-10, "0° and 360° rotations should be identical, diff: {}", diff);
+        assert!(
+            diff < 1e-10,
+            "0° and 360° rotations should be identical, diff: {}",
+            diff
+        );
 
         let ecef_0 = ecef_positions[0];
         let ecef_180 = ecef_positions[4];
-        assert!((ecef_0.x + ecef_180.x).abs() < 1e-10, "180° rotation should flip X");
-        assert!((ecef_0.y + ecef_180.y).abs() < 1e-10, "180° rotation should flip Y");
-        assert!((ecef_0.z - ecef_180.z).abs() < 1e-10, "180° rotation should preserve Z");
+        assert!(
+            (ecef_0.x + ecef_180.x).abs() < 1e-10,
+            "180° rotation should flip X"
+        );
+        assert!(
+            (ecef_0.y + ecef_180.y).abs() < 1e-10,
+            "180° rotation should flip Y"
+        );
+        assert!(
+            (ecef_0.z - ecef_180.z).abs() < 1e-10,
+            "180° rotation should preserve Z"
+        );
     }
 
     #[test]
