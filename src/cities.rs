@@ -1,4 +1,4 @@
-use crate::coord::Coordinates;
+use crate::core::coordinates::Coordinates;
 use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;

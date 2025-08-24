@@ -15,7 +15,7 @@ use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 mod cities;
-mod coord;
+mod core;
 mod earth;
 mod ground_track;
 mod ground_track_gizmo;

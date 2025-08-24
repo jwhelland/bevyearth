@@ -5,11 +5,10 @@
 
 use bevy::prelude::*;
 
-pub mod coordinates;
 pub mod propagation;
 pub mod time;
 
-pub use coordinates::{eci_to_ecef_km, ecef_to_bevy_world_km, gmst_rad_with_dut1};
+pub use crate::core::coordinates::{eci_to_ecef_km, ecef_to_bevy_world_km, gmst_rad_with_dut1};
 pub use propagation::minutes_since_epoch;
 pub use time::{SimulationTime, advance_simulation_clock, Dut1};
 

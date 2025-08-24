@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::mesh::PrimitiveTopology;
 
-use crate::coord::Coordinates;
+use crate::core::coordinates::Coordinates;
 
 pub const EARTH_RADIUS_KM: f32 = 6371.0;
 
