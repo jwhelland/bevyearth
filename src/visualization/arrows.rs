@@ -1,9 +1,8 @@
 //! Arrow visualization systems
 
-use crate::cities::CitiesEcef;
-use crate::coord::{hemisphere_prefilter, los_visible_ecef};
-use crate::earth::EARTH_RADIUS_KM;
+use crate::core::coordinates::{EARTH_RADIUS_KM, hemisphere_prefilter, los_visible_ecef};
 use crate::satellite::{Satellite, SatelliteColor};
+use crate::visualization::CitiesEcef;
 use crate::visualization::config::ArrowConfig;
 use bevy::prelude::*;
 

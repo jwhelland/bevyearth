@@ -1,4 +1,4 @@
-use crate::coord::Coordinates;
+use crate::core::coordinates::Coordinates;
 use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::SphereMeshBuilder;
@@ -87,6 +87,26 @@ pub fn major_cities_data() -> Vec<(String, f32, f32)> {
         (String::from("Johannesburg"), -26.2041, 28.0473),
         (String::from("Chicago"), 41.8781, -87.6298),
         (String::from("Taipei"), 25.0330, 121.5654),
+        (String::from("Vancouver"), 49.2827, -123.1207),
+        (String::from("Montreal"), 45.5017, -73.5673),
+        (String::from("Seattle"), 47.6062, -122.3321),
+        (String::from("San Francisco"), 37.7749, -122.4194),
+        (String::from("Boston"), 42.3601, -71.0589),
+        (String::from("Washington D.C."), 38.9072, -77.0369),
+        (String::from("Miami"), 25.7617, -80.1918),
+        (String::from("Houston"), 29.7604, -95.3698),
+        (String::from("Dallas"), 32.7767, -96.7970),
+        (String::from("Denver"), 39.7392, -104.9903),
+        (String::from("Berlin"), 52.5200, 13.4050),
+        (String::from("Madrid"), 40.4168, -3.7038),
+        (String::from("Rome"), 41.9028, 12.4964),
+        (String::from("Amsterdam"), 52.3676, 4.9041),
+        (String::from("Vienna"), 48.2082, 16.3738),
+        (String::from("Stockholm"), 59.3293, 18.0686),
+        (String::from("Oslo"), 59.9139, 10.7522),
+        (String::from("Helsinki"), 60.1699, 24.9384),
+        (String::from("Warsaw"), 52.2297, 21.0122),
+        (String::from("Prague"), 50.0755, 14.4378),
     ]
 }
 

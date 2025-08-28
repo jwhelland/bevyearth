@@ -14,11 +14,7 @@ use bevy::window::{PresentMode, Window, WindowPlugin};
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-mod cities;
-mod coord;
-mod earth;
-mod ground_track;
-mod ground_track_gizmo;
+mod core;
 mod orbital;
 mod satellite;
 mod tle;
@@ -26,17 +22,14 @@ mod ui;
 mod visualization;
 
 // Import plugins
-use cities::CitiesPlugin;
-use earth::EarthPlugin;
-use ground_track::GroundTrackPlugin;
-use ground_track_gizmo::GroundTrackGizmoPlugin;
 use orbital::OrbitalPlugin;
 use satellite::SatellitePlugin;
 use tle::TlePlugin;
-use ui::{SkyboxPlugin, UiPlugin};
-use visualization::{ShowAxes, VisualizationPlugin};
-
-use crate::ui::skybox::Cubemap;
+use ui::{SkyboxPlugin, UiPlugin, skybox::Cubemap};
+use visualization::{
+    CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, ShowAxes,
+    VisualizationPlugin,
+};
 
 // Setup scene and cameras
 pub fn setup(

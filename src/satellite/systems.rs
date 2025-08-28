@@ -1,7 +1,10 @@
 //! Satellite systems for propagation and position updates
 
-use crate::earth::EARTH_RADIUS_KM;
-use crate::orbital::{SimulationTime, Dut1, eci_to_ecef_km, ecef_to_bevy_world_km, gmst_rad_with_dut1, minutes_since_epoch};
+use crate::core::coordinates::EARTH_RADIUS_KM;
+use crate::orbital::{
+    Dut1, SimulationTime, ecef_to_bevy_world_km, eci_to_ecef_km, gmst_rad_with_dut1,
+    minutes_since_epoch,
+};
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
 use crate::satellite::resources::{SatWorldKm, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
@@ -74,7 +77,8 @@ pub fn spawn_missing_satellite_entities_system(
                     Mesh3d(meshes.add(mesh)),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         // base_color: entry.color,
-                        emissive: entry.color.to_linear() * config_bundle.render_cfg.emissive_intensity,
+                        emissive: entry.color.to_linear()
+                            * config_bundle.render_cfg.emissive_intensity,
                         ..Default::default()
                     })),
                     Satellite,
@@ -157,7 +161,6 @@ pub fn draw_orbit_trails_system(
     trail_query: Query<(&OrbitTrail, Entity), With<Satellite>>,
     mut gizmos: Gizmos,
 ) {
-
     for (trail, entity) in trail_query.iter() {
         // Find the satellite entry for this entity to get color and settings
         if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
@@ -173,7 +176,11 @@ pub fn draw_orbit_trails_system(
                 let point2 = &window[1];
 
                 // Calculate alpha based on position in trail (newer = more opaque)
-                let trail_position = trail.history.iter().position(|p| std::ptr::eq(p, point1)).unwrap_or(0) as f32;
+                let trail_position = trail
+                    .history
+                    .iter()
+                    .position(|p| std::ptr::eq(p, point1))
+                    .unwrap_or(0) as f32;
                 let trail_length = trail.history.len() as f32;
                 let alpha = (0.1 + 0.9 * (trail_position / trail_length.max(1.0))).min(1.0);
 
@@ -403,7 +410,8 @@ pub fn update_satellite_rendering_system(
         // Update material emissive intensity
         if let Ok(material_handle) = material_query.get(entity) {
             if let Some(material) = materials.get_mut(&material_handle.0) {
-                material.emissive = satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
+                material.emissive =
+                    satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
             }
         }
     }

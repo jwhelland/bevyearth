@@ -3,11 +3,9 @@ use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 use chrono::SecondsFormat;
 
-use crate::earth::EARTH_RADIUS_KM;
+use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::orbital::SimulationTime;
-use crate::satellite::{
-    SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite,
-};
+use crate::satellite::{SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite};
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::ui::state::{RightPanelUI, UIState};
@@ -89,75 +87,75 @@ pub fn render_right_panel(
     egui::CollapsingHeader::new("Satellite Groups")
         .default_open(true)
         .show(ui, |ui| {
-        ui.separator();
+            ui.separator();
 
-        // Group selection dropdown
-        egui::ComboBox::from_label("Select Group")
-            .selected_text(
-                right_ui
-                    .selected_group
-                    .as_ref()
-                    .map(|g| get_group_display_name(g))
-                    .unwrap_or("Choose a group..."),
-            )
-            .show_ui(ui, |ui| {
-                for (group_key, group_name) in SATELLITE_GROUPS {
-                    ui.selectable_value(
-                        &mut right_ui.selected_group,
-                        Some(group_key.to_string()),
-                        *group_name,
-                    );
+            // Group selection dropdown
+            egui::ComboBox::from_label("Select Group")
+                .selected_text(
+                    right_ui
+                        .selected_group
+                        .as_ref()
+                        .map(|g| get_group_display_name(g))
+                        .unwrap_or("Choose a group..."),
+                )
+                .show_ui(ui, |ui| {
+                    for (group_key, group_name) in SATELLITE_GROUPS {
+                        ui.selectable_value(
+                            &mut right_ui.selected_group,
+                            Some(group_key.to_string()),
+                            *group_name,
+                        );
+                    }
+                });
+
+            let mut load_group_request = None;
+            let mut set_error = None;
+            let mut set_loading = None;
+
+            ui.horizontal(|ui| {
+                let load_btn = ui.button("Load Group").clicked();
+                if right_ui.group_loading {
+                    ui.spinner();
+                    ui.label("Loading...");
+                }
+
+                if load_btn && !right_ui.group_loading {
+                    if let Some(group) = &right_ui.selected_group {
+                        load_group_request = Some(group.clone());
+                        set_loading = Some(true);
+                        set_error = Some(None);
+                    } else {
+                        set_error = Some(Some("Please select a group first".to_string()));
+                    }
                 }
             });
 
-        let mut load_group_request = None;
-        let mut set_error = None;
-        let mut set_loading = None;
+            // Handle the group loading request outside the closure
+            if let Some(group) = load_group_request {
+                right_ui.group_loading = true;
+                right_ui.error = None;
 
-        ui.horizontal(|ui| {
-            let load_btn = ui.button("Load Group").clicked();
-            if right_ui.group_loading {
-                ui.spinner();
-                ui.label("Loading...");
-            }
-
-            if load_btn && !right_ui.group_loading {
-                if let Some(group) = &right_ui.selected_group {
-                    load_group_request = Some(group.clone());
-                    set_loading = Some(true);
-                    set_error = Some(None);
+                // Send group fetch command
+                if let Some(fetch) = fetch_channels {
+                    if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
+                        eprintln!("[REQUEST] failed to send group fetch: {}", e);
+                        right_ui.error = Some(format!("Failed to request group: {}", e));
+                        right_ui.group_loading = false;
+                    }
                 } else {
-                    set_error = Some(Some("Please select a group first".to_string()));
-                }
-            }
-        });
-
-        // Handle the group loading request outside the closure
-        if let Some(group) = load_group_request {
-            right_ui.group_loading = true;
-            right_ui.error = None;
-
-            // Send group fetch command
-            if let Some(fetch) = fetch_channels {
-                if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup { group }) {
-                    eprintln!("[REQUEST] failed to send group fetch: {}", e);
-                    right_ui.error = Some(format!("Failed to request group: {}", e));
+                    eprintln!("[REQUEST] FetchChannels not available; cannot fetch group");
+                    right_ui.error = Some("Fetch service not available".to_string());
                     right_ui.group_loading = false;
                 }
-            } else {
-                eprintln!("[REQUEST] FetchChannels not available; cannot fetch group");
-                right_ui.error = Some("Fetch service not available".to_string());
-                right_ui.group_loading = false;
             }
-        }
 
-        // Apply any error state changes
-        if let Some(error) = set_error {
-            right_ui.error = error;
-        }
+            // Apply any error state changes
+            if let Some(error) = set_error {
+                right_ui.error = error;
+            }
 
-        ui.separator();
-    });
+            ui.separator();
+        });
 
     ui.collapsing("Individual Satellites", |ui| {
         ui.separator();
@@ -187,13 +185,16 @@ pub fn render_right_panel(
                                     Mesh3d(meshes.add(mesh)),
                                     MeshMaterial3d(materials.add(StandardMaterial {
                                         // base_color: color,
-                                        emissive: color.to_linear() * config_bundle.render_cfg.emissive_intensity,
+                                        emissive: color.to_linear()
+                                            * config_bundle.render_cfg.emissive_intensity,
                                         ..Default::default()
                                     })),
                                     Satellite,
                                     SatelliteColor(color),
                                     Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                                        .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
+                                        .with_scale(Vec3::splat(
+                                            config_bundle.render_cfg.sphere_radius,
+                                        )),
                                 ))
                                 .id();
                             store.items.insert(
@@ -297,18 +298,28 @@ pub fn render_right_panel(
     ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
-        ui.checkbox(&mut config_bundle.ground_track_cfg.enabled, "Show ground tracks");
+        ui.checkbox(
+            &mut config_bundle.ground_track_cfg.enabled,
+            "Show ground tracks",
+        );
         ui.add(
             egui::Slider::new(&mut config_bundle.ground_track_cfg.radius_km, 10.0..=500.0)
                 .text("Track radius (km)"),
         );
 
         ui.collapsing("Gizmo Settings", |ui| {
-            ui.checkbox(&mut config_bundle.gizmo_cfg.enabled, "Use gizmo circles (recommended)");
-            ui.add(
-                egui::Slider::new(&mut config_bundle.gizmo_cfg.circle_segments, 16..=128).text("Circle segments"),
+            ui.checkbox(
+                &mut config_bundle.gizmo_cfg.enabled,
+                "Use gizmo circles (recommended)",
             );
-            ui.checkbox(&mut config_bundle.gizmo_cfg.show_center_dot, "Show center dot");
+            ui.add(
+                egui::Slider::new(&mut config_bundle.gizmo_cfg.circle_segments, 16..=128)
+                    .text("Circle segments"),
+            );
+            ui.checkbox(
+                &mut config_bundle.gizmo_cfg.show_center_dot,
+                "Show center dot",
+            );
             if config_bundle.gizmo_cfg.show_center_dot {
                 ui.add(
                     egui::Slider::new(&mut config_bundle.gizmo_cfg.center_dot_size, 50.0..=500.0)
@@ -324,11 +335,15 @@ pub fn render_right_panel(
         ui.separator();
 
         ui.add(
-            egui::Slider::new(&mut config_bundle.trail_cfg.max_points, 100..=10000).text("Max history points"),
+            egui::Slider::new(&mut config_bundle.trail_cfg.max_points, 100..=10000)
+                .text("Max history points"),
         );
         ui.add(
-            egui::Slider::new(&mut config_bundle.trail_cfg.update_interval_seconds, 0.5..=10.0)
-                .text("Update interval (seconds)"),
+            egui::Slider::new(
+                &mut config_bundle.trail_cfg.update_interval_seconds,
+                0.5..=10.0,
+            )
+            .text("Update interval (seconds)"),
         );
 
         ui.separator();
@@ -342,8 +357,11 @@ pub fn render_right_panel(
                 .text("Sphere size (km)"),
         );
         ui.add(
-            egui::Slider::new(&mut config_bundle.render_cfg.emissive_intensity, 10.0..=500.0)
-                .text("Emissive intensity"),
+            egui::Slider::new(
+                &mut config_bundle.render_cfg.emissive_intensity,
+                10.0..=500.0,
+            )
+            .text("Emissive intensity"),
         );
 
         ui.separator();

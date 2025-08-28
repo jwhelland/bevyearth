@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-use crate::earth::EARTH_RADIUS_KM;
+use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::satellite::{Satellite, SatelliteStore};
 
 /// Plugin for ground track gizmo rendering and management
