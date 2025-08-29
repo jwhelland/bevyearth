@@ -298,6 +298,12 @@ pub fn ecef_to_bevy_world_km(ecef: DVec3) -> Vec3 {
     Vec3::new(ecef.y as f32, ecef.z as f32, ecef.x as f32)
 }
 
+/// Convert Bevy world coordinates back to ECEF coordinates (km)
+/// This is the inverse of ecef_to_bevy_world_km
+pub fn bevy_world_to_ecef_km(bevy: Vec3) -> Vec3 {
+    Vec3::new(bevy.z, bevy.x, bevy.y)
+}
+
 // =================================== Tests ===================================
 
 #[cfg(test)]

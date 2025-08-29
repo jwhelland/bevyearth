@@ -9,7 +9,7 @@ use crate::satellite::{SatEntry, Satellite, SatelliteColor, SatelliteStore, Sele
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::ui::state::{RightPanelUI, UIState};
-use crate::visualization::ArrowConfig;
+use crate::visualization::{ArrowConfig, HeatmapConfig, RangeMode};
 
 /// Convert Bevy Color to egui Color32
 fn bevy_to_egui_color(color: Color) -> Color32 {
@@ -25,6 +25,7 @@ pub fn render_left_panel(
     ui: &mut egui::Ui,
     arrows_cfg: &mut ArrowConfig,
     sim_time: &mut SimulationTime,
+    heatmap_cfg: &mut HeatmapConfig,
 ) {
     // ui.separator();
 
@@ -68,6 +69,54 @@ pub fn render_left_panel(
         });
         ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
     });
+    
+    ui.separator();
+    ui.heading("Satellite Heatmap");
+    ui.separator();
+    
+    if ui.checkbox(&mut heatmap_cfg.enabled, "Enable heatmap").changed() {
+        info!("Heatmap checkbox clicked! New value: {}", heatmap_cfg.enabled);
+    }
+    
+    if heatmap_cfg.enabled {
+        ui.horizontal(|ui| {
+            ui.label("Update period:");
+            ui.add(egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"));
+        });
+        
+        ui.horizontal(|ui| {
+            ui.label("Opacity:");
+            ui.add(egui::Slider::new(&mut heatmap_cfg.color_alpha, 0.0..=1.0).text("alpha"));
+        });
+        
+        ui.horizontal(|ui| {
+            ui.label("Range mode:");
+            ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Auto, "Auto");
+            ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Fixed, "Fixed");
+        });
+        
+        if heatmap_cfg.range_mode == RangeMode::Fixed {
+            ui.horizontal(|ui| {
+                ui.label("Fixed max:");
+                if let Some(ref mut fixed_max) = heatmap_cfg.fixed_max {
+                    ui.add(egui::Slider::new(fixed_max, 1..=100).text("satellites"));
+                } else {
+                    heatmap_cfg.fixed_max = Some(20);
+                }
+            });
+        }
+        
+        ui.collapsing("Performance Tuning", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Chunk size:");
+                ui.add(egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Chunks/frame:");
+                ui.add(egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"));
+            });
+        });
+    }
 }
 
 pub fn render_right_panel(
