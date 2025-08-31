@@ -25,7 +25,6 @@ pub fn render_left_panel(
     ui: &mut egui::Ui,
     arrows_cfg: &mut ArrowConfig,
     sim_time: &mut SimulationTime,
-    heatmap_cfg: &mut HeatmapConfig,
 ) {
     // ui.separator();
 
@@ -70,53 +69,6 @@ pub fn render_left_panel(
         ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
     });
     
-    ui.separator();
-    ui.heading("Satellite Heatmap");
-    ui.separator();
-    
-    if ui.checkbox(&mut heatmap_cfg.enabled, "Enable heatmap").changed() {
-        info!("Heatmap checkbox clicked! New value: {}", heatmap_cfg.enabled);
-    }
-    
-    if heatmap_cfg.enabled {
-        ui.horizontal(|ui| {
-            ui.label("Update period:");
-            ui.add(egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"));
-        });
-        
-        ui.horizontal(|ui| {
-            ui.label("Opacity:");
-            ui.add(egui::Slider::new(&mut heatmap_cfg.color_alpha, 0.0..=1.0).text("alpha"));
-        });
-        
-        ui.horizontal(|ui| {
-            ui.label("Range mode:");
-            ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Auto, "Auto");
-            ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Fixed, "Fixed");
-        });
-        
-        if heatmap_cfg.range_mode == RangeMode::Fixed {
-            ui.horizontal(|ui| {
-                ui.label("Fixed max:");
-                if let Some(ref mut fixed_max) = heatmap_cfg.fixed_max {
-                    ui.add(egui::Slider::new(fixed_max, 1..=100).text("satellites"));
-                } else {
-                    heatmap_cfg.fixed_max = Some(20);
-                }
-            });
-        }
-        
-        ui.collapsing("Performance Tuning", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Chunk size:");
-                ui.add(egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"));
-            });
-            ui.horizontal(|ui| {
-                ui.label("Chunks/frame:");
-                ui.add(egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"));
-            });
-        });
-    }
 }
 
 pub fn render_right_panel(
@@ -128,6 +80,7 @@ pub fn render_right_panel(
     materials: &mut Assets<StandardMaterial>,
     selected_sat: &mut SelectedSatellite,
     config_bundle: &mut crate::ui::systems::UiConfigBundle,
+    heatmap_cfg: &mut HeatmapConfig,
     fetch_channels: &Option<Res<FetchChannels>>,
 ) {
     ui.heading("Satellites");
@@ -303,10 +256,11 @@ pub fn render_right_panel(
         ui.label(format!("({} satellites)", store.items.len()));
     });
     ui.separator();
-    ui.collapsing("Master Controls", |ui| {
+
+    ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
-        // Compute current master states
+        // Compute current master states for ground tracks
         let ready_satellites: Vec<_> = store
             .items
             .values()
@@ -315,8 +269,6 @@ pub fn render_right_panel(
 
         let all_ground_tracks_enabled =
             !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_ground_track);
-        let all_trails_enabled =
-            !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_trail);
 
         // Master ground track checkbox
         let mut master_ground_track = all_ground_tracks_enabled;
@@ -331,20 +283,6 @@ pub fn render_right_panel(
             }
         }
 
-        // Master trails checkbox
-        let mut master_trails = all_trails_enabled;
-        if ui.checkbox(&mut master_trails, "All Trails").changed() {
-            for entry in store.items.values_mut() {
-                if entry.propagator.is_some() {
-                    entry.show_trail = master_trails;
-                }
-            }
-        }
-
-        ui.separator();
-    });
-
-    ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
         ui.checkbox(
@@ -383,6 +321,28 @@ pub fn render_right_panel(
     ui.collapsing("Orbit Trail Settings", |ui| {
         ui.separator();
 
+        // Compute current master states for trails
+        let ready_satellites: Vec<_> = store
+            .items
+            .values()
+            .filter(|s| s.propagator.is_some())
+            .collect();
+
+        let all_trails_enabled =
+            !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_trail);
+
+        // Master trails checkbox
+        let mut master_trails = all_trails_enabled;
+        if ui.checkbox(&mut master_trails, "All Trails").changed() {
+            for entry in store.items.values_mut() {
+                if entry.propagator.is_some() {
+                    entry.show_trail = master_trails;
+                }
+            }
+        }
+
+        ui.separator();
+
         ui.add(
             egui::Slider::new(&mut config_bundle.trail_cfg.max_points, 100..=10000)
                 .text("Max history points"),
@@ -394,6 +354,56 @@ pub fn render_right_panel(
             )
             .text("Update interval (seconds)"),
         );
+
+        ui.separator();
+    });
+
+    ui.collapsing("Heatmap Settings", |ui| {
+        ui.separator();
+
+        if ui.checkbox(&mut heatmap_cfg.enabled, "Enable heatmap").changed() {
+            info!("Heatmap checkbox clicked! New value: {}", heatmap_cfg.enabled);
+        }
+
+        if heatmap_cfg.enabled {
+            ui.horizontal(|ui| {
+                ui.label("Update period:");
+                ui.add(egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Opacity:");
+                ui.add(egui::Slider::new(&mut heatmap_cfg.color_alpha, 0.0..=1.0).text("alpha"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Range mode:");
+                ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Auto, "Auto");
+                ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Fixed, "Fixed");
+            });
+
+            if heatmap_cfg.range_mode == RangeMode::Fixed {
+                ui.horizontal(|ui| {
+                    ui.label("Fixed max:");
+                    if let Some(ref mut fixed_max) = heatmap_cfg.fixed_max {
+                        ui.add(egui::Slider::new(fixed_max, 1..=100).text("satellites"));
+                    } else {
+                        heatmap_cfg.fixed_max = Some(20);
+                    }
+                });
+            }
+
+            ui.collapsing("Performance Tuning", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Chunk size:");
+                    ui.add(egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Chunks/frame:");
+                    ui.add(egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"));
+                });
+            });
+        }
 
         ui.separator();
     });
@@ -715,3 +725,4 @@ pub fn render_bottom_panel_with_clicked_satellite(
     });
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
+

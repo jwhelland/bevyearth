@@ -82,7 +82,7 @@ pub fn ui_system(
         left = egui::SidePanel::left("left_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_left_panel(ui, &mut arrows_cfg, &mut sim_time, &mut heatmap_config);
+                render_left_panel(ui, &mut arrows_cfg, &mut sim_time);
             })
             .response
             .rect
@@ -103,6 +103,7 @@ pub fn ui_system(
                     &mut materials,
                     &mut selected_sat,
                     &mut config_bundle,
+                    &mut heatmap_config,
                     &fetch_channels,
                 );
             })
