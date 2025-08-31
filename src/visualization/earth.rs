@@ -6,7 +6,6 @@ use std::collections::HashMap;
 
 use crate::core::coordinates::{Coordinates, EARTH_RADIUS_KM};
 
-
 /// Plugin for Earth rendering and mesh generation
 pub struct EarthPlugin;
 
@@ -24,12 +23,7 @@ impl Plugin for EarthPlugin {
 
 // Legacy face generation function - kept for reference during migration
 #[allow(dead_code)]
-pub fn generate_face(
-    normal: Vec3,
-    resolution: u32,
-    x_offset: f32,
-    y_offset: f32,
-) -> Mesh {
+pub fn generate_face(normal: Vec3, resolution: u32, x_offset: f32, y_offset: f32) -> Mesh {
     let axis_a = Vec3::new(normal.y, normal.z, normal.x);
     let axis_b = axis_a.cross(normal);
 
@@ -38,7 +32,7 @@ pub fn generate_face(
     let mut indicies: Vec<u32> = Vec::new();
     let mut normals = Vec::new();
     let mut first_longitude = 0.0;
-    
+
     for y in 0..(resolution) {
         for x in 0..(resolution) {
             let i = x + y * resolution;
@@ -48,10 +42,10 @@ pub fn generate_face(
                 normal + (percent.x - x_offset) * axis_a + (percent.y - y_offset) * axis_b;
             let point_coords: Coordinates = point_on_unit_cube.normalize().into();
             let (lat, lon) = point_coords.as_degrees();
-            
+
             let normalized_point = point_on_unit_cube.normalize() * EARTH_RADIUS_KM;
             verticies.push(normalized_point);
-            
+
             let (mut u, v) = point_coords.convert_to_uv_mercator();
 
             if y == 0 && x == 0 {
@@ -63,7 +57,7 @@ pub fn generate_face(
             if x == 0 && lon == 180.0 && lat < -40.0 {
                 u = 0.0;
             }
-            
+
             uvs.push([u, v]);
             normals.push(-point_on_unit_cube.normalize());
 
@@ -77,7 +71,7 @@ pub fn generate_face(
             }
         }
     }
-    
+
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -87,7 +81,7 @@ pub fn generate_face(
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.generate_tangents().unwrap();
-    
+
     mesh
 }
 
@@ -100,7 +94,7 @@ pub fn generate_unified_earth(
 ) {
     let earth_mesh = generate_icosphere(5); // Subdivision level 5 for ~65k vertices
     let mesh_handle = meshes.add(earth_mesh);
-    
+
     // Store mesh handle for heatmap access
     commands.insert_resource(EarthMeshHandle {
         handle: mesh_handle.clone(),
@@ -112,9 +106,7 @@ pub fn generate_unified_earth(
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::WHITE, // White base color allows vertex colors to show through
                 base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
-                metallic_roughness_texture: Some(
-                    asset_server.load("specular_map_inverted_8k.png"),
-                ),
+                metallic_roughness_texture: Some(asset_server.load("specular_map_inverted_8k.png")),
                 perceptual_roughness: 1.0,
                 // Use unlit mode to make vertex colors more visible
                 unlit: true,
@@ -156,10 +148,9 @@ pub fn generate_icosphere(subdivisions: u32) -> Mesh {
 
     // Icosahedron faces (20 triangles)
     let mut indices = vec![
-        0, 11, 5,   0, 5, 1,    0, 1, 7,    0, 7, 10,   0, 10, 11,
-        1, 5, 9,    5, 11, 4,   11, 10, 2,  10, 7, 6,   7, 1, 8,
-        3, 9, 4,    3, 4, 2,    3, 2, 6,    3, 6, 8,    3, 8, 9,
-        4, 9, 5,    2, 4, 11,   6, 2, 10,   8, 6, 7,    9, 8, 1,
+        0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7,
+        1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9,
+        8, 1,
     ];
 
     let mut vertex_positions = vertices;
@@ -199,7 +190,7 @@ pub fn generate_icosphere(subdivisions: u32) -> Mesh {
         let normalized = vertex.normalize();
         final_vertices.push(normalized * EARTH_RADIUS_KM);
         normals.push(-normalized); // Inward-facing normals
-        
+
         // Convert to geographic coordinates for UV mapping with seam handling
         let coords: Coordinates = normalized.into();
         let (u, v) = coords.convert_to_uv_mercator();
@@ -231,18 +222,18 @@ fn get_midpoint_vertex(
     v2: u32,
 ) -> u32 {
     let key = if v1 < v2 { (v1, v2) } else { (v2, v1) };
-    
+
     if let Some(&index) = cache.get(&key) {
         return index;
     }
 
     let midpoint = (vertices[v1 as usize] + vertices[v2 as usize]) / 2.0;
     let normalized = midpoint.normalize();
-    
+
     vertices.push(normalized);
     let index = vertices.len() as u32 - 1;
     cache.insert(key, index);
-    
+
     index
 }
 
@@ -278,12 +269,12 @@ fn fix_texture_seams(
         if max_du > 0.5 {
             // This triangle crosses the seam, need to fix UVs
             let mut fixed_indices = [triangle[0], triangle[1], triangle[2]];
-            
+
             // Duplicate vertices and adjust UV coordinates to prevent wrap-around
             for j in 0..3 {
                 let idx = triangle[j] as usize;
                 let u = uvs[idx][0];
-                
+
                 // If this vertex is on the "wrong" side of the seam for this triangle
                 if u < 0.25 && max_du > 0.5 {
                     // Duplicate vertex with adjusted UV
@@ -293,7 +284,7 @@ fn fix_texture_seams(
                     fixed_indices[j] = new_vertices.len() as u32 - 1;
                 }
             }
-            
+
             new_indices.extend_from_slice(&fixed_indices);
         } else {
             // Normal triangle, no seam crossing

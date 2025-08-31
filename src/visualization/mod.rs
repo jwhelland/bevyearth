@@ -22,7 +22,7 @@ pub use config::ArrowConfig;
 pub use earth::EarthPlugin;
 pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
 pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
-pub use heatmap::{HeatmapPlugin, HeatmapConfig, RangeMode};
+pub use heatmap::{HeatmapConfig, HeatmapPlugin, RangeMode};
 
 /// Plugin for visualization systems
 pub struct VisualizationPlugin;

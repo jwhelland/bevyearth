@@ -2,13 +2,17 @@
 
 /// Predefined satellite groups available on Celestrak
 pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
+    ("geo", "Active Geosynchronous Satellites"),
+    ("analyst", "Analyst Satellites"),
     ("amateur", "Amateur Radio Satellites"),
     ("argos", "ARGOS Data Collection Satellites"),
     ("beidou", "Beidou Satellites"),
     ("dmc", "Disaster Monitoring Satellites"),
+    ("resource", "Earth Resources Satellites"),
     ("education", "Education Satellites"),
     ("engineering", "Engineering Satellites"),
     ("eutelsat", "Eutelsat Satellites"),
+    ("x-comm", "Experimental Communications"),
     ("galileo", "Galileo Satellites"),
     ("geodetic", "Geodetic Satellites"),
     ("glo-ops", "GLONASS Operational Satellites"),
@@ -19,8 +23,8 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     ("intelsat", "Intelsat Satellites"),
     ("iridium-NEXT", "Iridium NEXT Satellites"),
     ("iridium", "Iridium Satellites"),
+    ("last-30-days", "Last 30 Days Launches"),
     ("molniya", "Molniya Satellites"),
-    ("musson", "Russian LEO Navigation Satellites"),
     ("nnss", "Navy Navigation Satellite System"),
     ("noaa", "NOAA Satellites"),
     ("oneweb", "OneWeb Satellites"),
@@ -28,7 +32,7 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     ("other-comm", "Other Communications Satellites"),
     ("planet", "Planet Labs Satellites"),
     ("raduga", "Raduga Satellites"),
-    ("resource", "Earth Resources Satellites"),
+    ("musson", "Russian LEO Navigation Satellites"),
     ("sarsat", "Search & Rescue Satellites"),
     ("satnogs", "SatNOGS Satellites"),
     ("sbas", "Satellite-Based Augmentation System"),
@@ -40,7 +44,6 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     ("tdrss", "Tracking & Data Relay Satellites"),
     ("telesat", "Telesat Satellites"),
     ("weather", "Weather Satellites"),
-    ("x-comm", "Experimental Communications"),
 ];
 
 /// Get display name for a group

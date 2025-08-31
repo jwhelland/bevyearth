@@ -8,7 +8,9 @@ use bevy::prelude::*;
 pub mod propagation;
 pub mod time;
 
-pub use crate::core::coordinates::{bevy_world_to_ecef_km, ecef_to_bevy_world_km, eci_to_ecef_km, gmst_rad_with_dut1};
+pub use crate::core::coordinates::{
+    bevy_world_to_ecef_km, ecef_to_bevy_world_km, eci_to_ecef_km, gmst_rad_with_dut1,
+};
 pub use propagation::minutes_since_epoch;
 pub use time::{Dut1, SimulationTime, advance_simulation_clock};
 

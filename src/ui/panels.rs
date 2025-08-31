@@ -620,12 +620,12 @@ pub fn render_right_panel(
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
 
-pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &mut SimulationTime) {
+pub fn render_top_panel(ui: &mut egui::Ui, _state: &mut UIState, sim_time: &mut SimulationTime) {
     ui.horizontal(|ui| {
         // Time display
         ui.strong("UTC:");
         ui.monospace(
-            &sim_time
+            sim_time
                 .current_utc
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
         );
@@ -648,48 +648,8 @@ pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &mut S
         });
 
         ui.separator();
-        // Panel toggle buttons
-        ui.label("Panels:");
-        if ui
-            .small_button(if state.show_left_panel {
-                "Hide Left (H)"
-            } else {
-                "Show Left (H)"
-            })
-            .clicked()
-        {
-            state.show_left_panel = !state.show_left_panel;
-        }
-        if ui
-            .small_button(if state.show_right_panel {
-                "Hide Right (J)"
-            } else {
-                "Show Right (J)"
-            })
-            .clicked()
-        {
-            state.show_right_panel = !state.show_right_panel;
-        }
-        if ui
-            .small_button(if state.show_top_panel {
-                "Hide Top (K)"
-            } else {
-                "Show Top (K)"
-            })
-            .clicked()
-        {
-            state.show_top_panel = !state.show_top_panel;
-        }
-        if ui
-            .small_button(if state.show_bottom_panel {
-                "Hide Bottom (L)"
-            } else {
-                "Show Bottom (L)"
-            })
-            .clicked()
-        {
-            state.show_bottom_panel = !state.show_bottom_panel;
-        }
+        // Compact panel status indicator
+        ui.label("Panels: H/J/K/L");
     });
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
