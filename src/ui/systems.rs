@@ -48,6 +48,7 @@ pub fn ui_system(
     mut state: ResMut<UIState>,
     mut arrows_cfg: ResMut<ArrowConfig>,
     mut config_bundle: ResMut<UiConfigBundle>,
+    mut heatmap_config: ResMut<crate::visualization::HeatmapConfig>,
     mut sim_time: ResMut<SimulationTime>,
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
@@ -81,7 +82,7 @@ pub fn ui_system(
         left = egui::SidePanel::left("left_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_left_panel(ui, &mut arrows_cfg, &mut sim_time);
+                render_left_panel(ui, &mut arrows_cfg);
             })
             .response
             .rect
@@ -102,6 +103,7 @@ pub fn ui_system(
                     &mut materials,
                     &mut selected_sat,
                     &mut config_bundle,
+                    &mut heatmap_config,
                     &fetch_channels,
                 );
             })
@@ -115,7 +117,7 @@ pub fn ui_system(
         top = egui::TopBottomPanel::top("top_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_top_panel(ui, &mut state, &sim_time);
+                render_top_panel(ui, &mut state, &mut sim_time);
             })
             .response
             .rect

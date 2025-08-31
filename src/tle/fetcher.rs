@@ -1,4 +1,4 @@
-//! TLE fetching functionality
+// TLE fetching functionality
 
 use crate::tle::parser::parse_tle_epoch_to_utc;
 use crate::tle::types::{FetchChannels, FetchCommand, FetchResultMsg};
@@ -57,7 +57,7 @@ pub fn start_tle_worker() -> FetchChannels {
                     }
                     i += 1;
                 }
-                let sample: String = body.lines().take(6).collect::<Vec<_>>().join("\\n");
+                let sample: String = body.lines().take(6).collect::<Vec<_>>().join("\n");
                 anyhow::bail!(
                     "No valid TLE pair found for {}. Sample: {}",
                     requested_sat,
@@ -120,16 +120,12 @@ pub fn start_tle_worker() -> FetchChannels {
                         }
                     }
                     FetchCommand::FetchGroup { group } => {
-                        let url = format!(
-                            "https://celestrak.org/NORAD/elements/gp.php?GROUP={}&FORMAT=TLE",
-                            group
-                        );
                         let send = |m| {
                             let _ = res_tx.send(m);
                         };
                         let res = async {
                             let resp = client
-                                .get(&url)
+                                .get(&group)
                                 .header("accept", "text/plain")
                                 .send()
                                 .await?;

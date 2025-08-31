@@ -16,10 +16,10 @@ impl Default for UIState {
     fn default() -> Self {
         Self {
             show_axes: false,
-            show_left_panel: true,
+            show_left_panel: false,
             show_right_panel: true,
             show_top_panel: true,
-            show_bottom_panel: false, // Start with bottom panel hidden since it's unused
+            show_bottom_panel: true,
         }
     }
 }

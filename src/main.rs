@@ -27,7 +27,7 @@ use satellite::SatellitePlugin;
 use tle::TlePlugin;
 use ui::{SkyboxPlugin, UiPlugin, skybox::Cubemap};
 use visualization::{
-    CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, ShowAxes,
+    CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, HeatmapPlugin, ShowAxes,
     VisualizationPlugin,
 };
 
@@ -115,6 +115,7 @@ fn main() {
         .add_plugins(VisualizationPlugin)
         .add_plugins(GroundTrackPlugin)
         .add_plugins(GroundTrackGizmoPlugin)
+        .add_plugins(HeatmapPlugin)
         .add_systems(Startup, setup)
         .run();
 }

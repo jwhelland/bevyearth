@@ -9,7 +9,7 @@ use crate::satellite::{SatEntry, Satellite, SatelliteColor, SatelliteStore, Sele
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::ui::state::{RightPanelUI, UIState};
-use crate::visualization::ArrowConfig;
+use crate::visualization::{ArrowConfig, HeatmapConfig, RangeMode};
 
 /// Convert Bevy Color to egui Color32
 fn bevy_to_egui_color(color: Color) -> Color32 {
@@ -21,32 +21,7 @@ fn bevy_to_egui_color(color: Color) -> Color32 {
     )
 }
 
-pub fn render_left_panel(
-    ui: &mut egui::Ui,
-    arrows_cfg: &mut ArrowConfig,
-    sim_time: &mut SimulationTime,
-) {
-    // ui.separator();
-
-    // ui.heading("Rendering");
-    // ui.separator();
-    // ui.checkbox(&mut state.show_axes, "Show axes");
-
-    ui.separator();
-    ui.heading("Speedup time");
-    ui.horizontal(|ui| {
-        ui.label("Scale:");
-        ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
-        if ui.button("1x").clicked() {
-            sim_time.time_scale = 1.0;
-        }
-        if ui.button("Now").clicked() {
-            sim_time.current_utc = chrono::Utc::now();
-            sim_time.time_scale = 1.0;
-        }
-    });
-
-    ui.separator();
+pub fn render_left_panel(ui: &mut egui::Ui, arrows_cfg: &mut ArrowConfig) {
     ui.heading("City -> Sat Vis");
     ui.separator();
 
@@ -79,6 +54,7 @@ pub fn render_right_panel(
     materials: &mut Assets<StandardMaterial>,
     selected_sat: &mut SelectedSatellite,
     config_bundle: &mut crate::ui::systems::UiConfigBundle,
+    heatmap_cfg: &mut HeatmapConfig,
     fetch_channels: &Option<Res<FetchChannels>>,
 ) {
     ui.heading("Satellites");
@@ -254,10 +230,11 @@ pub fn render_right_panel(
         ui.label(format!("({} satellites)", store.items.len()));
     });
     ui.separator();
-    ui.collapsing("Master Controls", |ui| {
+
+    ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
-        // Compute current master states
+        // Compute current master states for ground tracks
         let ready_satellites: Vec<_> = store
             .items
             .values()
@@ -266,8 +243,6 @@ pub fn render_right_panel(
 
         let all_ground_tracks_enabled =
             !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_ground_track);
-        let all_trails_enabled =
-            !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_trail);
 
         // Master ground track checkbox
         let mut master_ground_track = all_ground_tracks_enabled;
@@ -282,20 +257,6 @@ pub fn render_right_panel(
             }
         }
 
-        // Master trails checkbox
-        let mut master_trails = all_trails_enabled;
-        if ui.checkbox(&mut master_trails, "All Trails").changed() {
-            for entry in store.items.values_mut() {
-                if entry.propagator.is_some() {
-                    entry.show_trail = master_trails;
-                }
-            }
-        }
-
-        ui.separator();
-    });
-
-    ui.collapsing("Ground Track Settings", |ui| {
         ui.separator();
 
         ui.checkbox(
@@ -334,6 +295,28 @@ pub fn render_right_panel(
     ui.collapsing("Orbit Trail Settings", |ui| {
         ui.separator();
 
+        // Compute current master states for trails
+        let ready_satellites: Vec<_> = store
+            .items
+            .values()
+            .filter(|s| s.propagator.is_some())
+            .collect();
+
+        let all_trails_enabled =
+            !ready_satellites.is_empty() && ready_satellites.iter().all(|s| s.show_trail);
+
+        // Master trails checkbox
+        let mut master_trails = all_trails_enabled;
+        if ui.checkbox(&mut master_trails, "All Trails").changed() {
+            for entry in store.items.values_mut() {
+                if entry.propagator.is_some() {
+                    entry.show_trail = master_trails;
+                }
+            }
+        }
+
+        ui.separator();
+
         ui.add(
             egui::Slider::new(&mut config_bundle.trail_cfg.max_points, 100..=10000)
                 .text("Max history points"),
@@ -345,6 +328,68 @@ pub fn render_right_panel(
             )
             .text("Update interval (seconds)"),
         );
+
+        ui.separator();
+    });
+
+    ui.collapsing("Heatmap Settings", |ui| {
+        ui.separator();
+
+        if ui
+            .checkbox(&mut heatmap_cfg.enabled, "Enable heatmap")
+            .changed()
+        {
+            info!(
+                "Heatmap checkbox clicked! New value: {}",
+                heatmap_cfg.enabled
+            );
+        }
+
+        if heatmap_cfg.enabled {
+            ui.horizontal(|ui| {
+                ui.label("Update period:");
+                ui.add(
+                    egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Opacity:");
+                ui.add(egui::Slider::new(&mut heatmap_cfg.color_alpha, 0.0..=1.0).text("alpha"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Range mode:");
+                ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Auto, "Auto");
+                ui.radio_value(&mut heatmap_cfg.range_mode, RangeMode::Fixed, "Fixed");
+            });
+
+            if heatmap_cfg.range_mode == RangeMode::Fixed {
+                ui.horizontal(|ui| {
+                    ui.label("Fixed max:");
+                    if let Some(ref mut fixed_max) = heatmap_cfg.fixed_max {
+                        ui.add(egui::Slider::new(fixed_max, 1..=100).text("satellites"));
+                    } else {
+                        heatmap_cfg.fixed_max = Some(20);
+                    }
+                });
+            }
+
+            ui.collapsing("Performance Tuning", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Chunk size:");
+                    ui.add(
+                        egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Chunks/frame:");
+                    ui.add(
+                        egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"),
+                    );
+                });
+            });
+        }
 
         ui.separator();
     });
@@ -575,7 +620,7 @@ pub fn render_right_panel(
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
 
-pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &SimulationTime) {
+pub fn render_top_panel(ui: &mut egui::Ui, _state: &mut UIState, sim_time: &mut SimulationTime) {
     ui.horizontal(|ui| {
         // Time display
         ui.strong("UTC:");
@@ -590,49 +635,21 @@ pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &Simul
         }
         ui.add_space(10.0);
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Speedup:");
+            ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
+            if ui.button("1x").clicked() {
+                sim_time.time_scale = 1.0;
+            }
+            if ui.button("Now").clicked() {
+                sim_time.current_utc = chrono::Utc::now();
+                sim_time.time_scale = 1.0;
+            }
+        });
 
-        // Panel toggle buttons
-        ui.label("Panels:");
-        if ui
-            .small_button(if state.show_left_panel {
-                "Hide Left (H)"
-            } else {
-                "Show Left (H)"
-            })
-            .clicked()
-        {
-            state.show_left_panel = !state.show_left_panel;
-        }
-        if ui
-            .small_button(if state.show_right_panel {
-                "Hide Right (J)"
-            } else {
-                "Show Right (J)"
-            })
-            .clicked()
-        {
-            state.show_right_panel = !state.show_right_panel;
-        }
-        if ui
-            .small_button(if state.show_top_panel {
-                "Hide Top (K)"
-            } else {
-                "Show Top (K)"
-            })
-            .clicked()
-        {
-            state.show_top_panel = !state.show_top_panel;
-        }
-        if ui
-            .small_button(if state.show_bottom_panel {
-                "Hide Bottom (L)"
-            } else {
-                "Show Bottom (L)"
-            })
-            .clicked()
-        {
-            state.show_bottom_panel = !state.show_bottom_panel;
-        }
+        ui.separator();
+        // Compact panel status indicator
+        ui.label("Panels: H/J/K/L");
     });
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
