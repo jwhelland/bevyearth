@@ -82,7 +82,7 @@ pub fn ui_system(
         left = egui::SidePanel::left("left_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_left_panel(ui, &mut arrows_cfg, &mut sim_time);
+                render_left_panel(ui, &mut arrows_cfg);
             })
             .response
             .rect
@@ -117,7 +117,7 @@ pub fn ui_system(
         top = egui::TopBottomPanel::top("top_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_top_panel(ui, &mut state, &sim_time);
+                render_top_panel(ui, &mut state, &mut sim_time);
             })
             .response
             .rect

@@ -19,7 +19,7 @@ impl Default for UIState {
             show_left_panel: true,
             show_right_panel: true,
             show_top_panel: true,
-            show_bottom_panel: false, // Start with bottom panel hidden since it's unused
+            show_bottom_panel: true,
         }
     }
 }

@@ -21,32 +21,7 @@ fn bevy_to_egui_color(color: Color) -> Color32 {
     )
 }
 
-pub fn render_left_panel(
-    ui: &mut egui::Ui,
-    arrows_cfg: &mut ArrowConfig,
-    sim_time: &mut SimulationTime,
-) {
-    // ui.separator();
-
-    // ui.heading("Rendering");
-    // ui.separator();
-    // ui.checkbox(&mut state.show_axes, "Show axes");
-
-    ui.separator();
-    ui.heading("Speedup time");
-    ui.horizontal(|ui| {
-        ui.label("Scale:");
-        ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
-        if ui.button("1x").clicked() {
-            sim_time.time_scale = 1.0;
-        }
-        if ui.button("Now").clicked() {
-            sim_time.current_utc = chrono::Utc::now();
-            sim_time.time_scale = 1.0;
-        }
-    });
-
-    ui.separator();
+pub fn render_left_panel(ui: &mut egui::Ui, arrows_cfg: &mut ArrowConfig) {
     ui.heading("City -> Sat Vis");
     ui.separator();
 
@@ -68,7 +43,6 @@ pub fn render_left_panel(
         });
         ui.checkbox(&mut arrows_cfg.gradient_log_scale, "Log scale");
     });
-    
 }
 
 pub fn render_right_panel(
@@ -361,14 +335,22 @@ pub fn render_right_panel(
     ui.collapsing("Heatmap Settings", |ui| {
         ui.separator();
 
-        if ui.checkbox(&mut heatmap_cfg.enabled, "Enable heatmap").changed() {
-            info!("Heatmap checkbox clicked! New value: {}", heatmap_cfg.enabled);
+        if ui
+            .checkbox(&mut heatmap_cfg.enabled, "Enable heatmap")
+            .changed()
+        {
+            info!(
+                "Heatmap checkbox clicked! New value: {}",
+                heatmap_cfg.enabled
+            );
         }
 
         if heatmap_cfg.enabled {
             ui.horizontal(|ui| {
                 ui.label("Update period:");
-                ui.add(egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"));
+                ui.add(
+                    egui::Slider::new(&mut heatmap_cfg.update_period_s, 0.1..=2.0).text("seconds"),
+                );
             });
 
             ui.horizontal(|ui| {
@@ -396,11 +378,15 @@ pub fn render_right_panel(
             ui.collapsing("Performance Tuning", |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Chunk size:");
-                    ui.add(egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"));
+                    ui.add(
+                        egui::Slider::new(&mut heatmap_cfg.chunk_size, 500..=5000).text("vertices"),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.label("Chunks/frame:");
-                    ui.add(egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"));
+                    ui.add(
+                        egui::Slider::new(&mut heatmap_cfg.chunks_per_frame, 1..=5).text("chunks"),
+                    );
                 });
             });
         }
@@ -634,12 +620,12 @@ pub fn render_right_panel(
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
 
-pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &SimulationTime) {
+pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &mut SimulationTime) {
     ui.horizontal(|ui| {
         // Time display
         ui.strong("UTC:");
         ui.monospace(
-            sim_time
+            &sim_time
                 .current_utc
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
         );
@@ -649,7 +635,19 @@ pub fn render_top_panel(ui: &mut egui::Ui, state: &mut UIState, sim_time: &Simul
         }
         ui.add_space(10.0);
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Speedup:");
+            ui.add(egui::Slider::new(&mut sim_time.time_scale, 1.0..=1000.0).logarithmic(false));
+            if ui.button("1x").clicked() {
+                sim_time.time_scale = 1.0;
+            }
+            if ui.button("Now").clicked() {
+                sim_time.current_utc = chrono::Utc::now();
+                sim_time.time_scale = 1.0;
+            }
+        });
 
+        ui.separator();
         // Panel toggle buttons
         ui.label("Panels:");
         if ui
@@ -725,4 +723,3 @@ pub fn render_bottom_panel_with_clicked_satellite(
     });
     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
 }
-
