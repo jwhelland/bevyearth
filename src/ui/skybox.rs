@@ -30,7 +30,7 @@ fn asset_loaded(
     if cubemap.activated
         && !cubemap.is_loaded
         && asset_server
-            .get_load_state(&cubemap.image_handle.clone_weak())
+            .get_load_state(cubemap.image_handle.id())
             .unwrap_or(LoadState::NotLoaded)
             .is_loaded()
     {
@@ -38,7 +38,13 @@ fn asset_loaded(
         // NOTE: PNGs do not have any metadata that could indicate they contain a cubemap texture,
         // so they appear as one texture. The following code reconfigures the texture as necessary.
         if image.texture_descriptor.array_layer_count() == 1 {
-            image.reinterpret_stacked_2d_as_array(image.height() / image.width());
+            if let Err(err) =
+                image.reinterpret_stacked_2d_as_array(image.height() / image.width())
+            {
+                warn!("Failed to reinterpret skybox image as cubemap: {}", err);
+                cubemap.is_loaded = true;
+                return;
+            }
             image.texture_view_descriptor = Some(TextureViewDescriptor {
                 dimension: Some(TextureViewDimension::Cube),
                 ..default()

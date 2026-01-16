@@ -228,7 +228,7 @@ fn update_heatmap_system(
     // Cache vertex positions on first run
     if !state.positions_cached {
         if let Some(positions_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-            if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) = positions_attr
+            if let bevy::mesh::VertexAttributeValues::Float32x3(positions) = positions_attr
             {
                 state.vertex_positions = positions.iter().map(|&pos| Vec3::from(pos)).collect();
                 state.positions_cached = true;

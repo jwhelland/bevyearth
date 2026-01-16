@@ -359,11 +359,11 @@ pub fn track_satellite_continuously(
 /// System to handle satellite click events and update the clicked satellite in the store
 pub fn satellite_click_system(
     mut store: ResMut<SatelliteStore>,
-    mut click_events: EventReader<Pointer<Click>>,
+    mut click_events: MessageReader<Pointer<Click>>,
     satellite_query: Query<Entity, With<Satellite>>,
 ) {
     for event in click_events.read() {
-        let clicked_entity = event.target;
+        let clicked_entity = event.entity;
 
         // Check if the clicked entity is a satellite
         if satellite_query.contains(clicked_entity) {

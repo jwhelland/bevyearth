@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.16.1", features = ["dynamic_linking"] }
+bevy = { version = "0.18.0", features = ["dynamic_linking"] }
 #bevy-inspector-egui = "0.32.0"
 #bevy_dev_tools = "0.16.1"
-bevy_egui = "0.35.1"
-bevy_panorbit_camera = "0.27.1"
+bevy_egui = "0.39.0"
+bevy_panorbit_camera = "0.34.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Async HTTP + TLS
 reqwest = { version = "0.12", default-features = false, features = ["http2", "charset", "rustls-tls"] }
@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
 glam = "0.27"
-egui_extras = "0.31"
+egui_extras = "0.33"
 
 [dev-dependencies]
 approx = "0.5"

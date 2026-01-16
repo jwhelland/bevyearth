@@ -1,7 +1,6 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::mesh::Indices;
-use bevy::render::mesh::PrimitiveTopology;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use std::collections::HashMap;
 
 use crate::core::coordinates::{Coordinates, EARTH_RADIUS_KM};
@@ -114,14 +113,14 @@ pub fn generate_unified_earth(
             })),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ))
-        .observe(|mut trigger: Trigger<Pointer<Click>>| {
-            let hit = &trigger.event().hit;
+        .observe(|mut event: On<Pointer<Click>>| {
+            let hit = &event.hit;
             if let Some(pos) = hit.position {
                 let coords: Coordinates = pos.into();
                 let (lat, lon) = coords.as_degrees();
                 info!("Latlon of selected point: Lat: {}, Lon: {}", lat, lon);
             }
-            trigger.propagate(false);
+            event.propagate(false);
         });
 }
 

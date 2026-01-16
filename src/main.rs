@@ -1,14 +1,15 @@
 // Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
 
 use bevy::core_pipeline::Skybox;
-use bevy::core_pipeline::bloom::Bloom;
+use bevy::post_process::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
-use bevy::render::mesh::Mesh;
+use bevy::mesh::Mesh;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
-use bevy::render::view::RenderLayers;
+use bevy::camera::visibility::RenderLayers;
+use bevy::render::view::Hdr;
 use bevy::window::{PresentMode, Window, WindowPlugin};
 
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
@@ -52,10 +53,10 @@ pub fn setup(
         Camera3d::default(),
         Camera {
             order: 1,
-            hdr: true, // 1. HDR is required for bloom
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
+        Hdr,
         PanOrbitCamera::default(),
         Skybox {
             image: skybox_handle.clone(),

@@ -1,7 +1,7 @@
 //! UI systems for the egui interface
 
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
+use bevy::camera::Viewport;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
 
