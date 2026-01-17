@@ -1,6 +1,6 @@
 use crate::core::coordinates::Coordinates;
-use bevy::prelude::*;
 use bevy::mesh::{SphereKind, SphereMeshBuilder};
+use bevy::prelude::*;
 
 /// Plugin for city visualization and management
 pub struct CitiesPlugin;

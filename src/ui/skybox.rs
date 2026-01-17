@@ -38,8 +38,7 @@ fn asset_loaded(
         // NOTE: PNGs do not have any metadata that could indicate they contain a cubemap texture,
         // so they appear as one texture. The following code reconfigures the texture as necessary.
         if image.texture_descriptor.array_layer_count() == 1 {
-            if let Err(err) =
-                image.reinterpret_stacked_2d_as_array(image.height() / image.width())
+            if let Err(err) = image.reinterpret_stacked_2d_as_array(image.height() / image.width())
             {
                 warn!("Failed to reinterpret skybox image as cubemap: {}", err);
                 cubemap.is_loaded = true;

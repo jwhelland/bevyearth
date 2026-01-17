@@ -1,6 +1,6 @@
 use bevy::asset::RenderAssetUsages;
-use bevy::prelude::*;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::core::coordinates::{Coordinates, EARTH_RADIUS_KM};

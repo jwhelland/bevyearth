@@ -1,14 +1,14 @@
 // Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::Skybox;
-use bevy::post_process::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::mesh::Mesh;
 use bevy::picking::prelude::*;
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
-use bevy::mesh::Mesh;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
-use bevy::camera::visibility::RenderLayers;
 use bevy::render::view::Hdr;
 use bevy::window::{PresentMode, Window, WindowPlugin};
 
