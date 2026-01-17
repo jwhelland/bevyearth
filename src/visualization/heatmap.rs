@@ -4,6 +4,7 @@
 //! It colors Earth mesh vertices based on the number of visible satellites from each point,
 //! using efficient chunked updates for smooth performance.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::time::Instant;
 
@@ -78,6 +79,21 @@ pub struct HeatmapState {
     pub positions_cached: bool,
 }
 
+#[derive(SystemParam)]
+struct HeatmapParams<'w, 's> {
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    satellite_query: Query<'w, 's, &'static Transform, With<Satellite>>,
+    satellite_store: Res<'w, SatelliteStore>,
+    sim_time: Res<'w, SimulationTime>,
+    heatmap_query: Query<
+        'w,
+        's,
+        (&'static Mesh3d, &'static MeshMaterial3d<StandardMaterial>),
+        With<HeatmapOverlay>,
+    >,
+}
+
 impl Default for HeatmapState {
     fn default() -> Self {
         Self {
@@ -119,29 +135,29 @@ fn initialize_heatmap_system(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if let Some(handle_res) = earth_mesh_handle {
-        if state.earth_mesh_handle.is_none() {
-            state.earth_mesh_handle = Some(handle_res.handle.clone());
+    if let Some(handle_res) = earth_mesh_handle
+        && state.earth_mesh_handle.is_none()
+    {
+        state.earth_mesh_handle = Some(handle_res.handle.clone());
 
-            // Initialize vertex buffers based on mesh
-            if let Some(mesh) = meshes.get(&handle_res.handle) {
-                if let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-                    let vertex_count = positions.len();
-                    state.vertex_counts.resize(vertex_count, 0);
-                    state
-                        .color_buffer
-                        .resize(vertex_count, [0.0, 0.0, 0.0, 0.0]);
+        // Initialize vertex buffers based on mesh
+        if let Some(mesh) = meshes.get(&handle_res.handle)
+            && let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            let vertex_count = positions.len();
+            state.vertex_counts.resize(vertex_count, 0);
+            state
+                .color_buffer
+                .resize(vertex_count, [0.0, 0.0, 0.0, 0.0]);
 
-                    // Create a separate heatmap overlay entity with its own mesh copy
-                    let overlay_mesh_handle = create_heatmap_overlay(
-                        &mut commands,
-                        &mut materials,
-                        &mut meshes,
-                        &handle_res.handle,
-                    );
-                    state.earth_mesh_handle = Some(overlay_mesh_handle);
-                }
-            }
+            // Create a separate heatmap overlay entity with its own mesh copy
+            let overlay_mesh_handle = create_heatmap_overlay(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                &handle_res.handle,
+            );
+            state.earth_mesh_handle = Some(overlay_mesh_handle);
         }
     }
 }
@@ -194,13 +210,17 @@ fn create_heatmap_overlay(
 fn update_heatmap_system(
     config: Res<HeatmapConfig>,
     mut state: ResMut<HeatmapState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    satellite_query: Query<&Transform, With<Satellite>>,
-    satellite_store: Res<SatelliteStore>,
-    sim_time: Res<SimulationTime>,
-    heatmap_query: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>), With<HeatmapOverlay>>,
+    params: HeatmapParams,
 ) {
+    let HeatmapParams {
+        mut meshes,
+        mut materials,
+        satellite_query,
+        satellite_store,
+        sim_time,
+        heatmap_query,
+    } = params;
+
     if !config.enabled {
         return;
     }
@@ -226,14 +246,12 @@ fn update_heatmap_system(
     };
 
     // Cache vertex positions on first run
-    if !state.positions_cached {
-        if let Some(positions_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-            if let bevy::mesh::VertexAttributeValues::Float32x3(positions) = positions_attr
-            {
-                state.vertex_positions = positions.iter().map(|&pos| Vec3::from(pos)).collect();
-                state.positions_cached = true;
-            }
-        }
+    if !state.positions_cached
+        && let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    {
+        state.vertex_positions = positions.iter().map(|&pos| Vec3::from(pos)).collect();
+        state.positions_cached = true;
     }
 
     if state.vertex_positions.is_empty() {
@@ -266,7 +284,12 @@ fn update_heatmap_system(
         if start_idx >= vertex_count {
             // Completed full pass - apply colors and reset
             let vertex_counts = state.vertex_counts.clone();
-            apply_colors_to_mesh(mesh, &vertex_counts, &config, &mut state.color_buffer);
+            apply_colors_to_mesh(
+                mesh,
+                &vertex_counts,
+                &config,
+                state.color_buffer.as_mut_slice(),
+            );
 
             // Update the material alpha to make heatmap visible (only if enabled)
             if let Some(material) = materials.get_mut(&material3d.0) {
@@ -343,7 +366,7 @@ fn apply_colors_to_mesh(
     mesh: &mut Mesh,
     vertex_counts: &[u32],
     config: &HeatmapConfig,
-    color_buffer: &mut Vec<[f32; 4]>,
+    color_buffer: &mut [[f32; 4]],
 ) {
     if vertex_counts.is_empty() {
         return;
@@ -378,7 +401,7 @@ fn apply_colors_to_mesh(
     }
 
     // Apply colors to mesh
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_buffer.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_buffer.to_vec());
 }
 
 /// Toggle heatmap overlay visibility based on config
@@ -388,21 +411,20 @@ fn toggle_heatmap_visibility(
     mut meshes: ResMut<Assets<Mesh>>,
     heatmap_query: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>), With<HeatmapOverlay>>,
 ) {
-    if config.is_changed() {
-        if let Ok((mesh3d, material3d)) = heatmap_query.single() {
-            if let Some(material) = materials.get_mut(&material3d.0) {
-                if config.enabled {
-                    // Enable heatmap - make material visible
-                    material.base_color.set_alpha(1.0);
-                } else {
-                    // Disable heatmap - hide completely
-                    material.base_color.set_alpha(0.0);
+    if config.is_changed()
+        && let Ok((mesh3d, material3d)) = heatmap_query.single()
+        && let Some(material) = materials.get_mut(&material3d.0)
+    {
+        if config.enabled {
+            // Enable heatmap - make material visible
+            material.base_color.set_alpha(1.0);
+        } else {
+            // Disable heatmap - hide completely
+            material.base_color.set_alpha(0.0);
 
-                    // Also clear vertex colors to prevent lingering effects
-                    if let Some(mesh) = meshes.get_mut(&mesh3d.0) {
-                        clear_vertex_colors(mesh);
-                    }
-                }
+            // Also clear vertex colors to prevent lingering effects
+            if let Some(mesh) = meshes.get_mut(&mesh3d.0) {
+                clear_vertex_colors(mesh);
             }
         }
     }

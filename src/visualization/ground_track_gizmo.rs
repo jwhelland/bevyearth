@@ -44,19 +44,19 @@ fn manage_ground_track_gizmo_components_system(
     for entry in store.items.values_mut() {
         let should_show = entry.show_ground_track && entry.propagator.is_some();
 
-        if let Some(sat_entity) = entry.entity {
-            if let Ok(entity) = satellite_query.get(sat_entity) {
-                let has_gizmo_component = gizmo_query.get(entity).is_ok();
+        if let Some(sat_entity) = entry.entity
+            && let Ok(entity) = satellite_query.get(sat_entity)
+        {
+            let has_gizmo_component = gizmo_query.get(entity).is_ok();
 
-                if should_show && !has_gizmo_component {
-                    // Add GroundTrackGizmo component
-                    commands
-                        .entity(entity)
-                        .insert(GroundTrackGizmo::new(entry.norad));
-                } else if !should_show && has_gizmo_component {
-                    // Remove GroundTrackGizmo component
-                    commands.entity(entity).remove::<GroundTrackGizmo>();
-                }
+            if should_show && !has_gizmo_component {
+                // Add GroundTrackGizmo component
+                commands
+                    .entity(entity)
+                    .insert(GroundTrackGizmo::new(entry.norad));
+            } else if !should_show && has_gizmo_component {
+                // Remove GroundTrackGizmo component
+                commands.entity(entity).remove::<GroundTrackGizmo>();
             }
         }
     }
@@ -157,7 +157,6 @@ fn draw_satellite_ground_track_gizmo(
         draw_center_dot(
             gizmos,
             nadir_point,
-            up,
             right,
             forward,
             config.center_dot_size,
@@ -168,7 +167,6 @@ fn draw_satellite_ground_track_gizmo(
     draw_ground_track_circle(
         gizmos,
         nadir_point,
-        up,
         right,
         forward,
         radius_km,
@@ -181,7 +179,6 @@ fn draw_satellite_ground_track_gizmo(
 fn draw_ground_track_circle(
     gizmos: &mut Gizmos,
     center: Vec3,
-    _up: Vec3,
     right: Vec3,
     forward: Vec3,
     radius_km: f32,
@@ -213,7 +210,6 @@ fn draw_ground_track_circle(
 fn draw_center_dot(
     gizmos: &mut Gizmos,
     center: Vec3,
-    up: Vec3,
     right: Vec3,
     forward: Vec3,
     dot_size_km: f32,
@@ -222,7 +218,6 @@ fn draw_center_dot(
     draw_ground_track_circle(
         gizmos,
         center,
-        up,
         right,
         forward,
         dot_size_km,

@@ -30,6 +30,7 @@ pub fn turbo_colormap(t: f32) -> [f32; 4] {
 }
 
 /// Red channel polynomial for Turbo colormap
+#[allow(clippy::excessive_precision)]
 fn polynomial_turbo_r(t: f32) -> f32 {
     let coeffs = [
         0.13572138,
@@ -44,6 +45,7 @@ fn polynomial_turbo_r(t: f32) -> f32 {
 }
 
 /// Green channel polynomial for Turbo colormap  
+#[allow(clippy::excessive_precision)]
 fn polynomial_turbo_g(t: f32) -> f32 {
     let coeffs = [
         0.09140261,
@@ -58,6 +60,7 @@ fn polynomial_turbo_g(t: f32) -> f32 {
 }
 
 /// Blue channel polynomial for Turbo colormap
+#[allow(clippy::excessive_precision)]
 fn polynomial_turbo_b(t: f32) -> f32 {
     let coeffs = [
         0.10342779,

@@ -13,6 +13,13 @@ use bevy::picking::events::Pointer;
 use bevy::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
 
+type CameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut PanOrbitCamera, &'static mut Transform),
+    (With<Camera3d>, Without<Satellite>),
+>;
+
 /// System to update the satellite world-coordinate resource from satellite transforms
 pub fn update_satellite_world(
     sat_query: Query<&Transform, With<Satellite>>,
@@ -144,13 +151,12 @@ pub fn update_orbit_trails_system(
 
     // Add OrbitTrail component to satellites that don't have it but need it
     for entry in store.items.values() {
-        if let Some(entity) = entry.entity {
-            if entry.show_trail {
-                // Check if entity already has OrbitTrail component
-                if trail_query.get(entity).is_err() {
-                    commands.entity(entity).insert(OrbitTrail::default());
-                }
-            }
+        if let Some(entity) = entry.entity
+            && entry.show_trail
+            && trail_query.get(entity).is_err()
+        {
+            // Check if entity already has OrbitTrail component
+            commands.entity(entity).insert(OrbitTrail::default());
         }
     }
 }
@@ -203,10 +209,7 @@ pub fn draw_orbit_trails_system(
 pub fn move_camera_to_satellite(
     mut selected: ResMut<SelectedSatellite>,
     store: Res<SatelliteStore>,
-    mut q_camera: Query<
-        (&mut PanOrbitCamera, &mut Transform),
-        (With<Camera3d>, Without<Satellite>),
-    >,
+    mut q_camera: CameraQuery<'_, '_>,
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
     if let Some(norad) = selected.selected.take() {
@@ -271,87 +274,79 @@ pub fn move_camera_to_satellite(
 pub fn track_satellite_continuously(
     tracking: Res<SelectedSatellite>,
     store: Res<SatelliteStore>,
-    mut q_camera: Query<
-        (&mut PanOrbitCamera, &mut Transform),
-        (With<Camera3d>, Without<Satellite>),
-    >,
+    mut q_camera: CameraQuery<'_, '_>,
     q_sat: Query<&Transform, With<Satellite>>,
     time: Res<Time>,
 ) {
     // Only track if we have a tracking target
-    if let Some(tracking_norad) = tracking.tracking {
-        if let Some(entry) = store.items.get(&tracking_norad) {
-            if let Some(entity) = entry.entity {
-                if let Ok(sat_transform) = q_sat.get(entity) {
-                    let sat_pos = sat_transform.translation;
+    if let Some(tracking_norad) = tracking.tracking
+        && let Some(entry) = store.items.get(&tracking_norad)
+        && let Some(entity) = entry.entity
+        && let Ok(sat_transform) = q_sat.get(entity)
+    {
+        let sat_pos = sat_transform.translation;
 
-                    // Calculate desired camera position with offset
-                    let dir = sat_pos.normalize();
-                    let offset = tracking.tracking_offset;
-                    let target_pos = dir * (sat_pos.length() + offset);
-                    let target_radius = target_pos.length();
+        // Calculate desired camera position with offset
+        let dir = sat_pos.normalize();
+        let offset = tracking.tracking_offset;
+        let target_pos = dir * (sat_pos.length() + offset);
+        let target_radius = target_pos.length();
 
-                    // Compute pitch and yaw from direction
-                    let direction = target_pos.normalize();
-                    let target_pitch = direction.y.asin();
-                    let target_yaw = direction.x.atan2(direction.z);
+        // Compute pitch and yaw from direction
+        let direction = target_pos.normalize();
+        let target_pitch = direction.y.asin();
+        let target_yaw = direction.x.atan2(direction.z);
 
-                    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-                        // Smoothly interpolate to target position
-                        let smooth_factor = tracking.smooth_factor;
-                        let dt = time.delta_secs();
-                        let lerp_factor = 1.0 - (1.0 - smooth_factor).powf(dt * 60.0); // 60fps normalized
+        if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
+            // Smoothly interpolate to target position
+            let smooth_factor = tracking.smooth_factor;
+            let dt = time.delta_secs();
+            let lerp_factor = 1.0 - (1.0 - smooth_factor).powf(dt * 60.0); // 60fps normalized
 
-                        // Update PanOrbitCamera targets
-                        poc.target_radius = target_radius;
-                        poc.target_pitch = target_pitch;
-                        poc.target_yaw = target_yaw;
-                        poc.focus = Vec3::ZERO;
+            // Update PanOrbitCamera targets
+            poc.target_radius = target_radius;
+            poc.target_pitch = target_pitch;
+            poc.target_yaw = target_yaw;
+            poc.focus = Vec3::ZERO;
 
-                        // Smoothly update current values if they exist
-                        if let Some(current_radius) = poc.radius {
-                            poc.radius = Some(
-                                current_radius + (target_radius - current_radius) * lerp_factor,
-                            );
-                        } else {
-                            poc.radius = Some(target_radius);
-                        }
-
-                        if let Some(current_pitch) = poc.pitch {
-                            poc.pitch =
-                                Some(current_pitch + (target_pitch - current_pitch) * lerp_factor);
-                        } else {
-                            poc.pitch = Some(target_pitch);
-                        }
-
-                        if let Some(current_yaw) = poc.yaw {
-                            // Handle yaw wrapping for shortest path
-                            let mut yaw_diff = target_yaw - current_yaw;
-                            if yaw_diff > std::f32::consts::PI {
-                                yaw_diff -= 2.0 * std::f32::consts::PI;
-                            } else if yaw_diff < -std::f32::consts::PI {
-                                yaw_diff += 2.0 * std::f32::consts::PI;
-                            }
-                            poc.yaw = Some(current_yaw + yaw_diff * lerp_factor);
-                        } else {
-                            poc.yaw = Some(target_yaw);
-                        }
-
-                        // Also update transform directly for immediate visual feedback
-                        let current_radius = poc.radius.unwrap_or(target_radius);
-                        let current_pitch = poc.pitch.unwrap_or(target_pitch);
-                        let current_yaw = poc.yaw.unwrap_or(target_yaw);
-
-                        let camera_pos = Vec3::new(
-                            current_radius * current_pitch.cos() * current_yaw.sin(),
-                            current_radius * current_pitch.sin(),
-                            current_radius * current_pitch.cos() * current_yaw.cos(),
-                        );
-                        cam_transform.translation = camera_pos;
-                        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-                    }
-                }
+            // Smoothly update current values if they exist
+            if let Some(current_radius) = poc.radius {
+                poc.radius = Some(current_radius + (target_radius - current_radius) * lerp_factor);
+            } else {
+                poc.radius = Some(target_radius);
             }
+
+            if let Some(current_pitch) = poc.pitch {
+                poc.pitch = Some(current_pitch + (target_pitch - current_pitch) * lerp_factor);
+            } else {
+                poc.pitch = Some(target_pitch);
+            }
+
+            if let Some(current_yaw) = poc.yaw {
+                // Handle yaw wrapping for shortest path
+                let mut yaw_diff = target_yaw - current_yaw;
+                if yaw_diff > std::f32::consts::PI {
+                    yaw_diff -= 2.0 * std::f32::consts::PI;
+                } else if yaw_diff < -std::f32::consts::PI {
+                    yaw_diff += 2.0 * std::f32::consts::PI;
+                }
+                poc.yaw = Some(current_yaw + yaw_diff * lerp_factor);
+            } else {
+                poc.yaw = Some(target_yaw);
+            }
+
+            // Also update transform directly for immediate visual feedback
+            let current_radius = poc.radius.unwrap_or(target_radius);
+            let current_pitch = poc.pitch.unwrap_or(target_pitch);
+            let current_yaw = poc.yaw.unwrap_or(target_yaw);
+
+            let camera_pos = Vec3::new(
+                current_radius * current_pitch.cos() * current_yaw.sin(),
+                current_radius * current_pitch.sin(),
+                current_radius * current_pitch.cos() * current_yaw.cos(),
+            );
+            cam_transform.translation = camera_pos;
+            cam_transform.look_at(Vec3::ZERO, Vec3::Y);
         }
     }
 }
@@ -408,11 +403,11 @@ pub fn update_satellite_rendering_system(
         transform.scale = Vec3::splat(config_bundle.render_cfg.sphere_radius);
 
         // Update material emissive intensity
-        if let Ok(material_handle) = material_query.get(entity) {
-            if let Some(material) = materials.get_mut(&material_handle.0) {
-                material.emissive =
-                    satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
-            }
+        if let Ok(material_handle) = material_query.get(entity)
+            && let Some(material) = materials.get_mut(&material_handle.0)
+        {
+            material.emissive =
+                satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
         }
     }
 }

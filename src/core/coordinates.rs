@@ -899,13 +899,14 @@ mod tests {
         let gmst_2000 = gmst_rad(century_2000);
         let gmst_2100 = gmst_rad(century_2100);
 
-        assert!(gmst_2000 >= 0.0 && gmst_2000 < std::f64::consts::TAU);
-        assert!(gmst_2100 >= 0.0 && gmst_2100 < std::f64::consts::TAU);
+        let tau_range = 0.0..std::f64::consts::TAU;
+        assert!(tau_range.contains(&gmst_2000));
+        assert!(tau_range.contains(&gmst_2100));
         assert!(gmst_2000.is_finite() && gmst_2100.is_finite());
 
         let century_1900 = Utc.with_ymd_and_hms(1900, 1, 1, 12, 0, 0).unwrap();
         let gmst_1900 = gmst_rad(century_1900);
-        assert!(gmst_1900 >= 0.0 && gmst_1900 < std::f64::consts::TAU);
+        assert!(tau_range.contains(&gmst_1900));
         assert!(gmst_1900.is_finite());
     }
 
@@ -917,8 +918,9 @@ mod tests {
         let gmst_minus_dut1 = gmst_rad_with_dut1(test_time, -0.9);
         let gmst_zero_dut1 = gmst_rad_with_dut1(test_time, 0.0);
 
-        assert!(gmst_plus_dut1 >= 0.0 && gmst_plus_dut1 < std::f64::consts::TAU);
-        assert!(gmst_minus_dut1 >= 0.0 && gmst_minus_dut1 < std::f64::consts::TAU);
+        let tau_range = 0.0..std::f64::consts::TAU;
+        assert!(tau_range.contains(&gmst_plus_dut1));
+        assert!(tau_range.contains(&gmst_minus_dut1));
 
         let diff_plus = (gmst_plus_dut1 - gmst_zero_dut1).abs();
         let diff_minus = (gmst_minus_dut1 - gmst_zero_dut1).abs();

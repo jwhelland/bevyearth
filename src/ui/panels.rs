@@ -2,6 +2,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 use chrono::SecondsFormat;
+use std::collections::hash_map::Entry;
 
 use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::orbital::SimulationTime;
@@ -45,18 +46,34 @@ pub fn render_left_panel(ui: &mut egui::Ui, arrows_cfg: &mut ArrowConfig) {
     });
 }
 
-pub fn render_right_panel(
+pub struct RightPanelContext<'a, 'cw, 'cs, 'fw> {
+    pub store: &'a mut SatelliteStore,
+    pub right_ui: &'a mut RightPanelUI,
+    pub commands: &'a mut Commands<'cw, 'cs>,
+    pub meshes: &'a mut Assets<Mesh>,
+    pub materials: &'a mut Assets<StandardMaterial>,
+    pub selected_sat: &'a mut SelectedSatellite,
+    pub config_bundle: &'a mut crate::ui::systems::UiConfigBundle,
+    pub heatmap_cfg: &'a mut HeatmapConfig,
+    pub fetch_channels: &'a Option<Res<'fw, FetchChannels>>,
+}
+
+pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
     ui: &mut egui::Ui,
-    store: &mut SatelliteStore,
-    right_ui: &mut RightPanelUI,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    selected_sat: &mut SelectedSatellite,
-    config_bundle: &mut crate::ui::systems::UiConfigBundle,
-    heatmap_cfg: &mut HeatmapConfig,
-    fetch_channels: &Option<Res<FetchChannels>>,
+    ctx: &mut RightPanelContext<'a, 'cw, 'cs, 'fw>,
 ) {
+    let RightPanelContext {
+        store,
+        right_ui,
+        commands,
+        meshes,
+        materials,
+        selected_sat,
+        config_bundle,
+        heatmap_cfg,
+        fetch_channels,
+    } = &mut *ctx;
+
     ui.heading("Satellites");
     ui.separator();
 
@@ -145,7 +162,7 @@ pub fn render_right_panel(
                 match right_ui.input.trim().parse::<u32>() {
                     Ok(norad) => {
                         right_ui.error = None;
-                        if !store.items.contains_key(&norad) {
+                        if let Entry::Vacant(entry) = store.items.entry(norad) {
                             // randomized bright color for satellite marker (deterministic by NORAD)
                             // simple LCG to spread hues without external RNG dependency
                             let seed = norad.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -173,21 +190,18 @@ pub fn render_right_panel(
                                         )),
                                 ))
                                 .id();
-                            store.items.insert(
+                            entry.insert(SatEntry {
                                 norad,
-                                SatEntry {
-                                    norad,
-                                    name: None,
-                                    color,
-                                    entity: Some(entity),
-                                    tle: None,
-                                    propagator: None,
-                                    error: None,
-                                    show_ground_track: false,
-                                    show_trail: false,
-                                    is_clicked: false,
-                                },
-                            );
+                                name: None,
+                                color,
+                                entity: Some(entity),
+                                tle: None,
+                                propagator: None,
+                                error: None,
+                                show_ground_track: false,
+                                show_trail: false,
+                                is_clicked: false,
+                            });
                             // Immediately send fetch request to background worker via injected resource
                             if let Some(fetch) = fetch_channels {
                                 if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
@@ -587,23 +601,25 @@ pub fn render_right_panel(
                             let s_norad = s.norad;
 
                             // Update show_ground_track if changed
-                            if has_propagator && show_ground_track != old_ground_track {
-                                if let Some(s_mut) = store.items.get_mut(&s_norad) {
-                                    s_mut.show_ground_track = show_ground_track;
-                                }
+                            if has_propagator
+                                && show_ground_track != old_ground_track
+                                && let Some(s_mut) = store.items.get_mut(&s_norad)
+                            {
+                                s_mut.show_ground_track = show_ground_track;
                             }
                             // Update show_trail if changed
-                            if has_propagator && show_trail != old_trail {
-                                if let Some(s_mut) = store.items.get_mut(&s_norad) {
-                                    s_mut.show_trail = show_trail;
-                                }
+                            if has_propagator
+                                && show_trail != old_trail
+                                && let Some(s_mut) = store.items.get_mut(&s_norad)
+                            {
+                                s_mut.show_trail = show_trail;
                             }
                             if remove {
-                                if let Some(s_mut) = store.items.get_mut(&s_norad) {
-                                    if let Some(entity) = s_mut.entity.take() {
-                                        // Bevy 0.16: despawn() recursively by default
-                                        commands.entity(entity).despawn();
-                                    }
+                                if let Some(s_mut) = store.items.get_mut(&s_norad)
+                                    && let Some(entity) = s_mut.entity.take()
+                                {
+                                    // Bevy 0.16: despawn() recursively by default
+                                    commands.entity(entity).despawn();
                                 }
                                 to_remove = Some(s_norad);
                                 break;

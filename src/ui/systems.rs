@@ -1,7 +1,7 @@
 //! UI systems for the egui interface
 
-use bevy::prelude::*;
 use bevy::camera::Viewport;
+use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
 
@@ -11,8 +11,8 @@ use crate::satellite::{
 };
 use crate::tle::FetchChannels;
 use crate::ui::panels::{
-    render_bottom_panel_with_clicked_satellite, render_left_panel, render_right_panel,
-    render_top_panel,
+    RightPanelContext, render_bottom_panel_with_clicked_satellite, render_left_panel,
+    render_right_panel, render_top_panel,
 };
 use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::ArrowConfig;
@@ -20,23 +20,12 @@ use crate::visualization::GroundTrackConfig;
 use crate::visualization::GroundTrackGizmoConfig;
 
 /// Configuration bundle to reduce parameter count
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct UiConfigBundle {
     pub ground_track_cfg: GroundTrackConfig,
     pub gizmo_cfg: GroundTrackGizmoConfig,
     pub trail_cfg: OrbitTrailConfig,
     pub render_cfg: SatelliteRenderConfig,
-}
-
-impl Default for UiConfigBundle {
-    fn default() -> Self {
-        Self {
-            ground_track_cfg: GroundTrackConfig::default(),
-            gizmo_cfg: GroundTrackGizmoConfig::default(),
-            trail_cfg: OrbitTrailConfig::default(),
-            render_cfg: SatelliteRenderConfig::default(),
-        }
-    }
 }
 
 /// Main UI system that renders all the egui panels
@@ -94,18 +83,18 @@ pub fn ui_system(
         right = egui::SidePanel::right("right_panel")
             .resizable(true)
             .show(ctx, |ui| {
-                render_right_panel(
-                    ui,
-                    &mut store,
-                    &mut right_ui,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &mut selected_sat,
-                    &mut config_bundle,
-                    &mut heatmap_config,
-                    &fetch_channels,
-                );
+                let mut right_panel_ctx = RightPanelContext {
+                    store: &mut store,
+                    right_ui: &mut right_ui,
+                    commands: &mut commands,
+                    meshes: &mut meshes,
+                    materials: &mut materials,
+                    selected_sat: &mut selected_sat,
+                    config_bundle: &mut config_bundle,
+                    heatmap_cfg: &mut heatmap_config,
+                    fetch_channels: &fetch_channels,
+                };
+                render_right_panel(ui, &mut right_panel_ctx);
             })
             .response
             .rect
