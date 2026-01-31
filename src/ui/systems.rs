@@ -1,10 +1,12 @@
 //! UI systems for the egui interface
 
 use bevy::camera::Viewport;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
 
+use crate::core::big_space::BigSpaceRoot;
 use crate::orbital::SimulationTime;
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
@@ -18,6 +20,13 @@ use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::ArrowConfig;
 use crate::visualization::GroundTrackConfig;
 use crate::visualization::GroundTrackGizmoConfig;
+use big_space::prelude::Grid;
+
+#[derive(SystemParam)]
+pub(crate) struct BigSpaceParams<'w, 's> {
+    root: Res<'w, BigSpaceRoot>,
+    grid_query: Query<'w, 's, &'static Grid>,
+}
 
 /// Configuration bundle to reduce parameter count
 #[derive(Resource, Default)]
@@ -46,6 +55,7 @@ pub fn ui_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selected_sat: ResMut<SelectedSatellite>,
     fetch_channels: Option<Res<FetchChannels>>,
+    big_space: BigSpaceParams,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -80,6 +90,9 @@ pub fn ui_system(
 
     let mut right = 0.0;
     if state.show_right_panel {
+        let Ok(grid) = big_space.grid_query.get(big_space.root.0) else {
+            return;
+        };
         right = egui::SidePanel::right("right_panel")
             .resizable(true)
             .show(ctx, |ui| {
@@ -93,6 +106,8 @@ pub fn ui_system(
                     config_bundle: &mut config_bundle,
                     heatmap_cfg: &mut heatmap_config,
                     fetch_channels: &fetch_channels,
+                    big_space_root: big_space.root.0,
+                    grid,
                 };
                 render_right_panel(ui, &mut right_panel_ctx);
             })

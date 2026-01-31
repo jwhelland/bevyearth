@@ -1,7 +1,11 @@
 //! Satellite systems for propagation and position updates
 
+use crate::core::big_space::{
+    BigSpaceRoot, bevy_abs_to_cell_local, ecef_to_cell_local, ecef_to_render,
+    render_origin_from_grid,
+};
 use crate::core::coordinates::EARTH_RADIUS_KM;
-use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
+use crate::core::space::WorldEcefKm;
 use crate::orbital::{
     Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
@@ -12,6 +16,7 @@ use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
 use bevy::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
+use big_space::prelude::{CellCoord, Grid};
 
 type CameraQuery<'w, 's> = Query<
     'w,
@@ -19,6 +24,16 @@ type CameraQuery<'w, 's> = Query<
     (&'static mut PanOrbitCamera, &'static mut Transform),
     (With<Camera3d>, Without<Satellite>),
 >;
+
+fn earth_render_position(grid: &Grid) -> Vec3 {
+    let (origin_cell, origin_local) = render_origin_from_grid(grid);
+    ecef_to_render(grid, DVec3::ZERO, origin_cell, origin_local)
+}
+
+fn sat_render_position(grid: &Grid, ecef_km: DVec3) -> Vec3 {
+    let (origin_cell, origin_local) = render_origin_from_grid(grid);
+    ecef_to_render(grid, ecef_km, origin_cell, origin_local)
+}
 
 /// System to propagate satellites using SGP4 and update their transforms
 pub fn propagate_satellites_system(
@@ -30,11 +45,17 @@ pub fn propagate_satellites_system(
             &mut Transform,
             &mut SatelliteColor,
             Option<&mut WorldEcefKm>,
+            Option<&mut CellCoord>,
         ),
         With<Satellite>,
     >,
     mut commands: Commands,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
+    let Ok(grid) = grid_query.get(big_space_root.0) else {
+        return;
+    };
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
     for entry in store.items.values() {
         if let (Some(tle), Some(constants)) = (&entry.tle, &entry.propagator) {
@@ -45,9 +66,15 @@ pub fn propagate_satellites_system(
                 let eci = DVec3::new(pos[0], pos[1], pos[2]);
                 let ecef = eci_to_ecef_km(eci, gmst);
                 if let Some(entity) = entry.entity
-                    && let Ok((mut t, mut c, world_opt)) = q.get_mut(entity)
+                    && let Ok((mut t, mut c, world_opt, cell_opt)) = q.get_mut(entity)
                 {
-                    t.translation = ecef_to_bevy_km(ecef);
+                    let (cell, local) = ecef_to_cell_local(grid, ecef);
+                    t.translation = local;
+                    if let Some(mut existing) = cell_opt {
+                        *existing = cell;
+                    } else {
+                        commands.entity(entity).insert(cell);
+                    }
                     if let Some(mut world) = world_opt {
                         world.0 = ecef;
                     } else {
@@ -67,7 +94,12 @@ pub fn spawn_missing_satellite_entities_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
+    let Ok(grid) = grid_query.get(big_space_root.0) else {
+        return;
+    };
     let mut satellites_to_spawn = Vec::new();
 
     // Collect satellites that need entities
@@ -81,21 +113,30 @@ pub fn spawn_missing_satellite_entities_system(
     for norad in satellites_to_spawn {
         if let Some(entry) = store.items.get_mut(&norad) {
             let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
-            let entity = commands
-                .spawn((
-                    Mesh3d(meshes.add(mesh)),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        // base_color: entry.color,
-                        emissive: entry.color.to_linear()
-                            * config_bundle.render_cfg.emissive_intensity,
-                        ..Default::default()
-                    })),
-                    Satellite,
-                    SatelliteColor(entry.color),
-                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                        .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
-                ))
-                .id();
+            // Initial spawn position in Bevy-space (will be updated on first propagation)
+            let spawn_pos = DVec3::new(EARTH_RADIUS_KM as f64 + 5000.0, 0.0, 0.0);
+            let (cell, local) = bevy_abs_to_cell_local(grid, spawn_pos);
+            let mut entity = Entity::PLACEHOLDER;
+            commands.entity(big_space_root.0).with_children(|parent| {
+                entity = parent
+                    .spawn((
+                        Mesh3d(meshes.add(mesh)),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            // base_color: entry.color,
+                            emissive: entry.color.to_linear()
+                                * config_bundle.render_cfg.emissive_intensity,
+                            ..Default::default()
+                        })),
+                        Satellite,
+                        SatelliteColor(entry.color),
+                        cell,
+                        Transform::from_translation(local)
+                            .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
+                        // Insert WorldEcefKm at spawn so queries don't miss newly spawned satellites
+                        WorldEcefKm(DVec3::ZERO),
+                    ))
+                    .id();
+            });
             entry.entity = Some(entity);
         }
     }
@@ -168,7 +209,13 @@ pub fn draw_orbit_trails_system(
     store: Res<SatelliteStore>,
     trail_query: Query<(&OrbitTrail, Entity), With<Satellite>>,
     mut gizmos: Gizmos,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
+    let Ok(grid) = grid_query.get(big_space_root.0) else {
+        return;
+    };
+    let (origin_cell, origin_local) = render_origin_from_grid(grid);
     for (trail, entity) in trail_query.iter() {
         // Find the satellite entry for this entity to get color and settings
         if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
@@ -193,16 +240,13 @@ pub fn draw_orbit_trails_system(
                 let alpha = (0.1 + 0.9 * (trail_position / trail_length.max(1.0))).min(1.0);
 
                 // Create color with fade
-                let trail_color = Color::srgba(
-                    base_color.to_srgba().red,
-                    base_color.to_srgba().green,
-                    base_color.to_srgba().blue,
-                    alpha,
-                );
+                let trail_color = base_color.with_alpha(alpha);
 
                 // Draw line segment (convert canonical ECEF to Bevy render space)
-                let point1_bevy = ecef_to_bevy_km(point1.position_ecef_km);
-                let point2_bevy = ecef_to_bevy_km(point2.position_ecef_km);
+                let point1_bevy =
+                    ecef_to_render(grid, point1.position_ecef_km, origin_cell, origin_local);
+                let point2_bevy =
+                    ecef_to_render(grid, point2.position_ecef_km, origin_cell, origin_local);
                 gizmos.line(point1_bevy, point2_bevy, trail_color);
             }
         }
@@ -214,27 +258,33 @@ pub fn move_camera_to_satellite(
     mut selected: ResMut<SelectedSatellite>,
     store: Res<SatelliteStore>,
     mut q_camera: CameraQuery<'_, '_>,
-    q_sat: Query<&Transform, With<Satellite>>,
+    q_sat: Query<&WorldEcefKm, With<Satellite>>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
     if let Some(norad) = selected.selected.take() {
         if let Some(entry) = store.items.get(&norad) {
             if let Some(entity) = entry.entity {
-                if let Ok(sat_transform) = q_sat.get(entity) {
-                    let sat_pos = sat_transform.translation;
+                if let Ok(world_ecef) = q_sat.get(entity) {
+                    let Ok(grid) = grid_query.get(big_space_root.0) else {
+                        return;
+                    };
+                    let earth_pos = earth_render_position(grid);
+                    let sat_pos = sat_render_position(grid, world_ecef.0);
+                    let rel = sat_pos - earth_pos;
 
-                    let dir = sat_pos.normalize();
                     let offset = 5000.0; // km
-                    let new_pos = dir * (sat_pos.length() + offset);
-                    let new_radius = new_pos.length();
+                    let new_radius = rel.length() + offset;
 
                     // Compute pitch and yaw from direction
-                    let direction = new_pos.normalize();
+                    let direction = rel.normalize();
                     let pitch = direction.y.asin();
                     let yaw = direction.x.atan2(direction.z);
 
                     if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
                         // Force immediate camera position without smooth transition
-                        poc.focus = Vec3::ZERO;
+                        poc.focus = earth_pos;
+                        poc.target_focus = earth_pos;
 
                         // Set target values first
                         poc.target_radius = new_radius;
@@ -254,20 +304,20 @@ pub fn move_camera_to_satellite(
                             new_radius * pitch.cos() * yaw.sin(),
                             new_radius * pitch.sin(),
                             new_radius * pitch.cos() * yaw.cos(),
-                        );
+                        ) + earth_pos;
                         cam_transform.translation = camera_pos;
-                        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+                        cam_transform.look_at(earth_pos, Vec3::Y);
                     } else {
-                        println!("[CAMERA] Failed to get camera");
+                        warn!("[CAMERA] Failed to get camera");
                     }
                 } else {
-                    println!("[CAMERA] Failed to get satellite transform");
+                    warn!("[CAMERA] Failed to get satellite WorldEcefKm");
                 }
             } else {
-                println!("[CAMERA] No entity for satellite");
+                warn!("[CAMERA] No entity for satellite");
             }
         } else {
-            println!("[CAMERA] No satellite found for norad={}", norad);
+            warn!("[CAMERA] No satellite found for norad={}", norad);
         }
         // Clear selection after processing
         selected.selected = None;
@@ -279,25 +329,30 @@ pub fn track_satellite_continuously(
     tracking: Res<SelectedSatellite>,
     store: Res<SatelliteStore>,
     mut q_camera: CameraQuery<'_, '_>,
-    q_sat: Query<&Transform, With<Satellite>>,
+    q_sat: Query<&WorldEcefKm, With<Satellite>>,
     time: Res<Time>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
     // Only track if we have a tracking target
     if let Some(tracking_norad) = tracking.tracking
         && let Some(entry) = store.items.get(&tracking_norad)
         && let Some(entity) = entry.entity
-        && let Ok(sat_transform) = q_sat.get(entity)
+        && let Ok(world_ecef) = q_sat.get(entity)
     {
-        let sat_pos = sat_transform.translation;
+        let Ok(grid) = grid_query.get(big_space_root.0) else {
+            return;
+        };
+        let earth_pos = earth_render_position(grid);
+        let sat_pos = sat_render_position(grid, world_ecef.0);
+        let rel = sat_pos - earth_pos;
 
         // Calculate desired camera position with offset
-        let dir = sat_pos.normalize();
         let offset = tracking.tracking_offset;
-        let target_pos = dir * (sat_pos.length() + offset);
-        let target_radius = target_pos.length();
+        let target_radius = rel.length() + offset;
 
         // Compute pitch and yaw from direction
-        let direction = target_pos.normalize();
+        let direction = rel.normalize();
         let target_pitch = direction.y.asin();
         let target_yaw = direction.x.atan2(direction.z);
 
@@ -311,7 +366,8 @@ pub fn track_satellite_continuously(
             poc.target_radius = target_radius;
             poc.target_pitch = target_pitch;
             poc.target_yaw = target_yaw;
-            poc.focus = Vec3::ZERO;
+            poc.focus = earth_pos;
+            poc.target_focus = earth_pos;
 
             // Smoothly update current values if they exist
             if let Some(current_radius) = poc.radius {
@@ -348,9 +404,9 @@ pub fn track_satellite_continuously(
                 current_radius * current_pitch.cos() * current_yaw.sin(),
                 current_radius * current_pitch.sin(),
                 current_radius * current_pitch.cos() * current_yaw.cos(),
-            );
+            ) + earth_pos;
             cam_transform.translation = camera_pos;
-            cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+            cam_transform.look_at(earth_pos, Vec3::Y);
         }
     }
 }

@@ -11,7 +11,9 @@ pub struct ArrowConfig {
     pub lift_m: f32,
     #[allow(dead_code)]
     pub head_len_pct: f32,
+    #[allow(dead_code)]
     pub head_min_m: f32,
+    #[allow(dead_code)]
     pub head_max_m: f32,
     #[allow(dead_code)]
     pub head_radius_pct: f32,

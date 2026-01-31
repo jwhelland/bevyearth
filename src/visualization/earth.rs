@@ -1,9 +1,13 @@
 use bevy::asset::RenderAssetUsages;
+use bevy::math::DVec3;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::core::big_space::{BigSpaceRoot, StartupSet, render_origin_from_grid};
 use crate::core::coordinates::{Coordinates, EARTH_RADIUS_KM};
+use crate::core::space::bevy_to_ecef_km_dvec;
+use big_space::prelude::{CellCoord, Grid};
 
 /// Plugin for Earth rendering and mesh generation
 pub struct EarthPlugin;
@@ -16,7 +20,7 @@ pub struct EarthMeshHandle {
 
 impl Plugin for EarthPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, generate_unified_earth);
+        app.add_systems(Startup, generate_unified_earth.in_set(StartupSet::Scene));
     }
 }
 
@@ -90,6 +94,7 @@ pub fn generate_unified_earth(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    big_space_root: Res<BigSpaceRoot>,
 ) {
     let earth_mesh = generate_icosphere(5); // Subdivision level 5 for ~65k vertices
     let mesh_handle = meshes.add(earth_mesh);
@@ -99,29 +104,52 @@ pub fn generate_unified_earth(
         handle: mesh_handle.clone(),
     });
 
-    commands
-        .spawn((
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::WHITE, // White base color allows vertex colors to show through
-                base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
-                metallic_roughness_texture: Some(asset_server.load("specular_map_inverted_8k.png")),
-                perceptual_roughness: 1.0,
-                // Use unlit mode to make vertex colors more visible
-                unlit: true,
-                ..default()
-            })),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        ))
-        .observe(|mut event: On<Pointer<Click>>| {
-            let hit = &event.hit;
-            if let Some(pos) = hit.position {
-                let coords: Coordinates = pos.into();
-                let (lat, lon) = coords.as_degrees();
-                info!("Latlon of selected point: Lat: {}, Lon: {}", lat, lon);
-            }
-            event.propagate(false);
-        });
+    commands.entity(big_space_root.0).with_children(|parent| {
+        parent
+            .spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::WHITE, // White base color allows vertex colors to show through
+                    base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
+                    metallic_roughness_texture: Some(
+                        asset_server.load("specular_map_inverted_8k.png"),
+                    ),
+                    perceptual_roughness: 1.0,
+                    // Use unlit mode to make vertex colors more visible
+                    unlit: true,
+                    ..default()
+                })),
+                CellCoord::ZERO,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .observe(
+                |mut event: On<Pointer<Click>>,
+                 big_space_root: Res<BigSpaceRoot>,
+                 grid_query: Query<&Grid>| {
+                    let hit = &event.hit;
+                    if let Some(pos) = hit.position {
+                        let Ok(grid) = grid_query.get(big_space_root.0) else {
+                            event.propagate(false);
+                            return;
+                        };
+                        let (origin_cell, origin_local) = render_origin_from_grid(grid);
+                        let origin_world = origin_cell.as_dvec3(grid)
+                            + DVec3::new(
+                                origin_local.x as f64,
+                                origin_local.y as f64,
+                                origin_local.z as f64,
+                            );
+                        let bevy_abs =
+                            DVec3::new(pos.x as f64, pos.y as f64, pos.z as f64) + origin_world;
+                        let ecef_km = bevy_to_ecef_km_dvec(bevy_abs);
+                        let coords: Coordinates = ecef_km.into();
+                        let (lat, lon) = coords.as_degrees();
+                        info!("Latlon of selected point: Lat: {}, Lon: {}", lat, lon);
+                    }
+                    event.propagate(false);
+                },
+            );
+    });
 }
 
 /// Generate icosphere mesh with specified subdivision levels

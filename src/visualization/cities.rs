@@ -1,8 +1,9 @@
+use crate::core::big_space::{BigSpaceRoot, StartupSet, ecef_to_cell_local};
 use crate::core::coordinates::Coordinates;
-use crate::core::space::ecef_to_bevy_km;
 use bevy::math::DVec3;
 use bevy::mesh::{SphereKind, SphereMeshBuilder};
 use bevy::prelude::*;
+use big_space::prelude::Grid;
 
 /// Plugin for city visualization and management
 pub struct CitiesPlugin;
@@ -11,7 +12,9 @@ impl Plugin for CitiesPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (initialize_cities_ecef, spawn_city_markers).chain(),
+            (initialize_cities_ecef, spawn_city_markers)
+                .chain()
+                .in_set(StartupSet::Scene),
         );
     }
 }
@@ -116,26 +119,34 @@ pub fn spawn_city_markers(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
     let major_cities = major_cities_data();
+    let Ok(grid) = grid_query.get(big_space_root.0) else {
+        return;
+    };
 
     // Visual markers
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Ico { subdivisions: 32 });
-    for (name, latitude, longitude) in major_cities {
-        let ecef_km = Coordinates::from_degrees(latitude, longitude)
-            .unwrap()
-            .get_point_on_sphere_ecef_km_dvec();
-        let bevy_km = ecef_to_bevy_km(ecef_km);
+    commands.entity(big_space_root.0).with_children(|parent| {
+        for (name, latitude, longitude) in major_cities {
+            let ecef_km = Coordinates::from_degrees(latitude, longitude)
+                .unwrap()
+                .get_point_on_sphere_ecef_km_dvec();
+            let (cell, local) = ecef_to_cell_local(grid, ecef_km);
 
-        commands.spawn((
-            Mesh3d(meshes.add(sphere_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 1.0, 0.0),
-                unlit: true,
-                ..default()
-            })),
-            Transform::from_translation(bevy_km).with_scale(Vec3::splat(CITY_RADIUS)),
-            CityMarker { name },
-        ));
-    }
+            parent.spawn((
+                Mesh3d(meshes.add(sphere_mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(1.0, 1.0, 0.0),
+                    unlit: true,
+                    ..default()
+                })),
+                cell,
+                Transform::from_translation(local).with_scale(Vec3::splat(CITY_RADIUS)),
+                CityMarker { name },
+            ));
+        }
+    });
 }

@@ -4,6 +4,7 @@ use bevy_egui::egui::{self, Color32};
 use chrono::SecondsFormat;
 use std::collections::hash_map::Entry;
 
+use crate::core::big_space::bevy_abs_to_cell_local;
 use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::orbital::SimulationTime;
 use crate::satellite::{SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite};
@@ -11,6 +12,8 @@ use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::ui::state::{RightPanelUI, UIState};
 use crate::visualization::{ArrowConfig, HeatmapConfig, RangeMode};
+use bevy::math::DVec3;
+use big_space::prelude::Grid;
 
 /// Convert Bevy Color to egui Color32
 fn bevy_to_egui_color(color: Color) -> Color32 {
@@ -56,6 +59,8 @@ pub struct RightPanelContext<'a, 'cw, 'cs, 'fw> {
     pub config_bundle: &'a mut crate::ui::systems::UiConfigBundle,
     pub heatmap_cfg: &'a mut HeatmapConfig,
     pub fetch_channels: &'a Option<Res<'fw, FetchChannels>>,
+    pub big_space_root: Entity,
+    pub grid: &'a Grid,
 }
 
 pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
@@ -72,6 +77,8 @@ pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
         config_bundle,
         heatmap_cfg,
         fetch_channels,
+        big_space_root,
+        grid,
     } = &mut *ctx;
 
     ui.heading("Satellites");
@@ -173,23 +180,28 @@ pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
 
                             // spawn entity placeholder
                             let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
-                            let entity = commands
-                                .spawn((
-                                    Mesh3d(meshes.add(mesh)),
-                                    MeshMaterial3d(materials.add(StandardMaterial {
-                                        // base_color: color,
-                                        emissive: color.to_linear()
-                                            * config_bundle.render_cfg.emissive_intensity,
-                                        ..Default::default()
-                                    })),
-                                    Satellite,
-                                    SatelliteColor(color),
-                                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                                        .with_scale(Vec3::splat(
+                            let spawn_pos = DVec3::new(EARTH_RADIUS_KM as f64 + 5000.0, 0.0, 0.0);
+                            let (cell, local) = bevy_abs_to_cell_local(grid, spawn_pos);
+                            let mut entity = Entity::PLACEHOLDER;
+                            commands.entity(*big_space_root).with_children(|parent| {
+                                entity = parent
+                                    .spawn((
+                                        Mesh3d(meshes.add(mesh)),
+                                        MeshMaterial3d(materials.add(StandardMaterial {
+                                            // base_color: color,
+                                            emissive: color.to_linear()
+                                                * config_bundle.render_cfg.emissive_intensity,
+                                            ..Default::default()
+                                        })),
+                                        Satellite,
+                                        SatelliteColor(color),
+                                        cell,
+                                        Transform::from_translation(local).with_scale(Vec3::splat(
                                             config_bundle.render_cfg.sphere_radius,
                                         )),
-                                ))
-                                .id();
+                                    ))
+                                    .id();
+                            });
                             entry.insert(SatEntry {
                                 norad,
                                 name: None,

@@ -17,8 +17,20 @@ pub fn ecef_to_bevy_km(ecef_km: DVec3) -> Vec3 {
     Vec3::new(ecef_km.y as f32, ecef_km.z as f32, ecef_km.x as f32)
 }
 
+/// Convert standard ECEF km (f64) to Bevy render km (f64).
+/// Mapping: Bevy (x,y,z) = (ECEF.y, ECEF.z, ECEF.x)
+pub fn ecef_to_bevy_km_dvec(ecef_km: DVec3) -> DVec3 {
+    DVec3::new(ecef_km.y, ecef_km.z, ecef_km.x)
+}
+
 /// Convert Bevy render km (f32) to standard ECEF km (f64).
 /// Inverse mapping: ECEF (x,y,z) = (Bevy.z, Bevy.x, Bevy.y)
 pub fn bevy_to_ecef_km(bevy_km: Vec3) -> DVec3 {
     DVec3::new(bevy_km.z as f64, bevy_km.x as f64, bevy_km.y as f64)
+}
+
+/// Convert Bevy render km (f64) to standard ECEF km (f64).
+/// Inverse mapping: ECEF (x,y,z) = (Bevy.z, Bevy.x, Bevy.y)
+pub fn bevy_to_ecef_km_dvec(bevy_km: DVec3) -> DVec3 {
+    DVec3::new(bevy_km.z, bevy_km.x, bevy_km.y)
 }

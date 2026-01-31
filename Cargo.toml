@@ -9,6 +9,7 @@ bevy = { version = "0.18.0", features = ["dynamic_linking"] }
 #bevy_dev_tools = "0.16.1"
 bevy_egui = "0.39.0"
 bevy_panorbit_camera = "0.34.0"
+big_space = { git = "https://github.com/kurtkuehnert/big_space", branch = "bevy_0.18" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Async HTTP + TLS
 reqwest = { version = "0.12", default-features = false, features = ["http2", "charset", "rustls-tls"] }

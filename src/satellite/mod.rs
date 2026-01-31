@@ -4,6 +4,7 @@
 //! and managing satellite entities in the Bevy ECS.
 
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 
 pub mod components;
 pub mod resources;
@@ -33,12 +34,17 @@ impl Plugin for SatellitePlugin {
                     spawn_missing_satellite_entities_system,
                     propagate_satellites_system.after(spawn_missing_satellite_entities_system),
                     update_orbit_trails_system.after(propagate_satellites_system),
-                    draw_orbit_trails_system.after(update_orbit_trails_system),
                     update_satellite_rendering_system,
                     move_camera_to_satellite,
                     track_satellite_continuously.after(propagate_satellites_system),
                     satellite_click_system,
                 ),
+            )
+            // Draw gizmos after big_space has updated the floating origin and propagated transforms
+            // for this frame. Otherwise gizmos can be a frame behind and appear to "teleport."
+            .add_systems(
+                PostUpdate,
+                draw_orbit_trails_system.after(TransformSystems::Propagate),
             );
     }
 }

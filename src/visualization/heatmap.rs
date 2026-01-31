@@ -9,6 +9,7 @@ use bevy::math::DVec3;
 use bevy::prelude::*;
 use std::time::Instant;
 
+use crate::core::big_space::{BigSpaceRoot, bevy_abs_to_cell_local};
 use crate::core::coordinates::{
     EARTH_RADIUS_KM, hemisphere_prefilter_ecef_dvec, los_visible_ecef_dvec,
 };
@@ -17,6 +18,7 @@ use crate::orbital::SimulationTime;
 use crate::satellite::{Satellite, SatelliteStore};
 use crate::visualization::colormaps::turbo_colormap;
 use crate::visualization::earth::EarthMeshHandle;
+use big_space::prelude::Grid;
 
 /// Component to mark the heatmap overlay entity
 #[derive(Component)]
@@ -138,10 +140,15 @@ fn initialize_heatmap_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
     if let Some(handle_res) = earth_mesh_handle
         && state.earth_mesh_handle.is_none()
     {
+        let Ok(grid) = grid_query.get(big_space_root.0) else {
+            return;
+        };
         state.earth_mesh_handle = Some(handle_res.handle.clone());
 
         // Initialize vertex buffers based on mesh
@@ -160,6 +167,8 @@ fn initialize_heatmap_system(
                 &mut materials,
                 &mut meshes,
                 &handle_res.handle,
+                big_space_root.0,
+                grid,
             );
             state.earth_mesh_handle = Some(overlay_mesh_handle);
         }
@@ -172,6 +181,8 @@ fn create_heatmap_overlay(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     original_mesh_handle: &Handle<Mesh>,
+    big_space_root: Entity,
+    grid: &Grid,
 ) -> Handle<Mesh> {
     // Clone the original mesh to create a separate mesh for the heatmap
     let overlay_mesh = if let Some(original_mesh) = meshes.get(original_mesh_handle) {
@@ -200,12 +211,16 @@ fn create_heatmap_overlay(
         ..default()
     });
 
-    commands.spawn((
-        Mesh3d(overlay_mesh_handle.clone()),
-        MeshMaterial3d(heatmap_material),
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(1.001)), // Slightly larger to sit on top
-        HeatmapOverlay, // Mark this entity as the heatmap overlay
-    ));
+    let (cell, local) = bevy_abs_to_cell_local(grid, DVec3::ZERO);
+    commands.entity(big_space_root).with_children(|parent| {
+        parent.spawn((
+            Mesh3d(overlay_mesh_handle.clone()),
+            MeshMaterial3d(heatmap_material),
+            cell,
+            Transform::from_translation(local).with_scale(Vec3::splat(1.001)), // Slightly larger to sit on top
+            HeatmapOverlay, // Mark this entity as the heatmap overlay
+        ));
+    });
 
     overlay_mesh_handle
 }

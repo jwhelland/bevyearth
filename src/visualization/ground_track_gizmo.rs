@@ -4,12 +4,15 @@
 //! for better visibility on Earth's surface.
 
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 use std::f64::consts::PI;
 
+use crate::core::big_space::{BigSpaceRoot, ecef_to_render, render_origin_from_grid};
 use crate::core::coordinates::EARTH_RADIUS_KM;
-use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
+use crate::core::space::WorldEcefKm;
 use crate::satellite::{Satellite, SatelliteStore};
 use bevy::math::DVec3;
+use big_space::prelude::{CellCoord, Grid};
 
 /// Plugin for ground track gizmo rendering and management
 pub struct GroundTrackGizmoPlugin;
@@ -17,13 +20,13 @@ pub struct GroundTrackGizmoPlugin;
 impl Plugin for GroundTrackGizmoPlugin {
     fn build(&self, app: &mut App) {
         // GroundTrackGizmoConfig is now initialized in UiConfigBundle
-        app.add_systems(
-            Update,
-            (
-                manage_ground_track_gizmo_components_system,
-                draw_ground_track_gizmos_system.after(manage_ground_track_gizmo_components_system),
-            ),
-        );
+        app.add_systems(Update, manage_ground_track_gizmo_components_system)
+            // Draw gizmos after big_space has updated the floating origin and propagated transforms
+            // for this frame. Otherwise gizmos can be a frame behind and appear to "teleport."
+            .add_systems(
+                PostUpdate,
+                draw_ground_track_gizmos_system.after(TransformSystems::Propagate),
+            );
     }
 }
 
@@ -115,10 +118,16 @@ pub fn draw_ground_track_gizmos_system(
     mut gizmos: Gizmos,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     satellite_query: Query<(&WorldEcefKm, &GroundTrackGizmo), With<Satellite>>,
+    big_space_root: Res<BigSpaceRoot>,
+    grid_query: Query<&Grid>,
 ) {
     if !config_bundle.gizmo_cfg.enabled || !config_bundle.ground_track_cfg.enabled {
         return;
     }
+    let Ok(grid) = grid_query.get(big_space_root.0) else {
+        return;
+    };
+    let (origin_cell, origin_local) = render_origin_from_grid(grid);
 
     for (world_ecef, ground_track_gizmo) in satellite_query.iter() {
         if !ground_track_gizmo.enabled {
@@ -130,6 +139,9 @@ pub fn draw_ground_track_gizmos_system(
             &config_bundle.gizmo_cfg,
             world_ecef.0,
             config_bundle.ground_track_cfg.radius_km,
+            grid,
+            origin_cell,
+            origin_local,
         );
     }
 }
@@ -140,6 +152,9 @@ fn draw_satellite_ground_track_gizmo(
     config: &GroundTrackGizmoConfig,
     sat_ecef_km: DVec3,
     radius_km: f32,
+    grid: &Grid,
+    origin_cell: CellCoord,
+    origin_local: Vec3,
 ) {
     // Find the nadir point (ground projection of satellite)
     let nadir_point = sat_ecef_km.normalize() * (EARTH_RADIUS_KM as f64);
@@ -162,6 +177,9 @@ fn draw_satellite_ground_track_gizmo(
             forward,
             config.center_dot_size as f64,
             config.circle_color,
+            grid,
+            origin_cell,
+            origin_local,
         );
     }
 
@@ -173,6 +191,9 @@ fn draw_satellite_ground_track_gizmo(
         radius_km as f64,
         config.circle_color,
         config.circle_segments,
+        grid,
+        origin_cell,
+        origin_local,
     );
 }
 
@@ -185,6 +206,9 @@ fn draw_ground_track_circle(
     radius_km: f64,
     color: Color,
     segments: u32,
+    grid: &Grid,
+    origin_cell: CellCoord,
+    origin_local: Vec3,
 ) {
     let angle_step = 2.0 * PI / segments as f64;
     let mut points = Vec::with_capacity(segments as usize);
@@ -203,8 +227,8 @@ fn draw_ground_track_circle(
     // Draw the circle as connected line segments
     for i in 0..segments {
         let next_i = (i + 1) % segments;
-        let p0 = ecef_to_bevy_km(points[i as usize]);
-        let p1 = ecef_to_bevy_km(points[next_i as usize]);
+        let p0 = ecef_to_render(grid, points[i as usize], origin_cell, origin_local);
+        let p1 = ecef_to_render(grid, points[next_i as usize], origin_cell, origin_local);
         gizmos.line(p0, p1, color);
     }
 }
@@ -217,6 +241,9 @@ fn draw_center_dot(
     forward: DVec3,
     dot_size_km: f64,
     color: Color,
+    grid: &Grid,
+    origin_cell: CellCoord,
+    origin_local: Vec3,
 ) {
     draw_ground_track_circle(
         gizmos,
@@ -226,6 +253,9 @@ fn draw_center_dot(
         dot_size_km,
         color,
         16, // Lower resolution for center dot
+        grid,
+        origin_cell,
+        origin_local,
     );
 }
 
