@@ -40,10 +40,6 @@ pub struct SatEntry {
     pub is_clicked: bool,
 }
 
-/// Resource for satellite position in Bevy world coordinates (kilometers)
-#[derive(Resource, Deref, DerefMut, Default)]
-pub struct SatWorldKm(pub Vec3);
-
 /// Resource for configuring orbit trail behavior
 #[derive(Resource)]
 pub struct OrbitTrailConfig {

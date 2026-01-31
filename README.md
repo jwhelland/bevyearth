@@ -31,6 +31,10 @@ This is a toy project to help me learn bevy and rust, along with a good dose of 
 3. Run `cargo run` to start the application
 4. Use mouse to navigate around Earth and the UI panel to manage satellites
 
+## Docs
+
+- [Coordinate frames](docs/coordinates.md)
+
 ## Controls
 
 - **Mouse**: Rotate and zoom around Earth

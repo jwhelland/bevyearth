@@ -5,10 +5,14 @@
 //! using efficient chunked updates for smooth performance.
 
 use bevy::ecs::system::SystemParam;
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use std::time::Instant;
 
-use crate::core::coordinates::{EARTH_RADIUS_KM, hemisphere_prefilter, los_visible_ecef};
+use crate::core::coordinates::{
+    EARTH_RADIUS_KM, hemisphere_prefilter_ecef_dvec, los_visible_ecef_dvec,
+};
+use crate::core::space::{WorldEcefKm, bevy_to_ecef_km};
 use crate::orbital::SimulationTime;
 use crate::satellite::{Satellite, SatelliteStore};
 use crate::visualization::colormaps::turbo_colormap;
@@ -83,7 +87,7 @@ pub struct HeatmapState {
 struct HeatmapParams<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
-    satellite_query: Query<'w, 's, &'static Transform, With<Satellite>>,
+    satellite_query: Query<'w, 's, &'static WorldEcefKm, With<Satellite>>,
     satellite_store: Res<'w, SatelliteStore>,
     sim_time: Res<'w, SimulationTime>,
     heatmap_query: Query<
@@ -259,7 +263,7 @@ fn update_heatmap_system(
     }
 
     // Collect current satellite positions in ECEF
-    let satellite_positions_ecef: Vec<Vec3> =
+    let satellite_positions_ecef: Vec<DVec3> =
         collect_satellite_positions_ecef(&satellite_query, &satellite_store, &sim_time);
 
     if satellite_positions_ecef.is_empty() {
@@ -315,12 +319,14 @@ fn update_heatmap_system(
             let surface_point_bevy = vertex_pos.normalize() * EARTH_RADIUS_KM;
 
             // Convert from Bevy world coordinates to ECEF for visibility calculation
-            let surface_point_ecef =
-                crate::core::coordinates::bevy_world_to_ecef_km(surface_point_bevy);
+            let surface_point_ecef = bevy_to_ecef_km(surface_point_bevy);
 
             // Calculate actual satellite visibility from this surface point in ECEF
-            let visible_count =
-                count_visible_satellites(&surface_point_ecef, &satellite_positions_ecef);
+            let visible_count = count_visible_satellites(
+                &surface_point_ecef,
+                &satellite_positions_ecef,
+                EARTH_RADIUS_KM as f64,
+            );
             state.vertex_counts[i] = visible_count;
         }
 
@@ -330,29 +336,30 @@ fn update_heatmap_system(
 
 /// Collect satellite positions in ECEF coordinates
 fn collect_satellite_positions_ecef(
-    satellite_query: &Query<&Transform, With<Satellite>>,
+    satellite_query: &Query<&WorldEcefKm, With<Satellite>>,
     _satellite_store: &SatelliteStore,
     _sim_time: &SimulationTime,
-) -> Vec<Vec3> {
-    use crate::orbital::bevy_world_to_ecef_km;
-
-    // Convert from Bevy world coordinates back to ECEF for visibility calculations
+) -> Vec<DVec3> {
     satellite_query
         .iter()
-        .map(|transform| bevy_world_to_ecef_km(transform.translation))
+        .map(|world_ecef| world_ecef.0)
         .collect()
 }
 
 /// Count visible satellites from a given surface point
-fn count_visible_satellites(surface_point: &Vec3, satellite_positions: &[Vec3]) -> u32 {
+fn count_visible_satellites(
+    surface_point: &DVec3,
+    satellite_positions: &[DVec3],
+    earth_radius_km: f64,
+) -> u32 {
     let mut visible_count = 0;
 
     // Check visibility for each satellite
     for &sat_pos in satellite_positions {
         // Pre-filter using hemisphere check
-        if hemisphere_prefilter(*surface_point, sat_pos, EARTH_RADIUS_KM) {
+        if hemisphere_prefilter_ecef_dvec(*surface_point, sat_pos, earth_radius_km) {
             // Check line-of-sight visibility
-            if los_visible_ecef(*surface_point, sat_pos, EARTH_RADIUS_KM) {
+            if los_visible_ecef_dvec(*surface_point, sat_pos, earth_radius_km) {
                 visible_count += 1;
             }
         }

@@ -1,4 +1,6 @@
 use crate::core::coordinates::Coordinates;
+use crate::core::space::ecef_to_bevy_km;
+use bevy::math::DVec3;
 use bevy::mesh::{SphereKind, SphereMeshBuilder};
 use bevy::prelude::*;
 
@@ -20,10 +22,10 @@ fn initialize_cities_ecef(mut commands: Commands) {
     let mut cache = Vec::with_capacity(major_cities.len());
 
     for (_name, latitude, longitude) in &major_cities {
-        let ecef = Coordinates::from_degrees(*latitude, *longitude)
+        let ecef_km = Coordinates::from_degrees(*latitude, *longitude)
             .unwrap()
-            .get_point_on_sphere(); // already returns EARTH_RADIUS_KM scaled Vec3
-        cache.push(ecef);
+            .get_point_on_sphere_ecef_km_dvec();
+        cache.push(ecef_km);
     }
 
     commands.insert_resource(CitiesEcef(cache));
@@ -33,7 +35,7 @@ const CITY_RADIUS: f32 = 15.0;
 
 // CPU cache of city locations in ECEF kilometers
 #[derive(Resource, Deref, DerefMut, Default)]
-pub struct CitiesEcef(pub Vec<Vec3>);
+pub struct CitiesEcef(pub Vec<DVec3>);
 
 // Create a component to store city information.
 // Not used in this example, but could be used for a tooltip or similar.
@@ -120,9 +122,10 @@ pub fn spawn_city_markers(
     // Visual markers
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Ico { subdivisions: 32 });
     for (name, latitude, longitude) in major_cities {
-        let coords = Coordinates::from_degrees(latitude, longitude)
+        let ecef_km = Coordinates::from_degrees(latitude, longitude)
             .unwrap()
-            .get_point_on_sphere();
+            .get_point_on_sphere_ecef_km_dvec();
+        let bevy_km = ecef_to_bevy_km(ecef_km);
 
         commands.spawn((
             Mesh3d(meshes.add(sphere_mesh)),
@@ -131,7 +134,7 @@ pub fn spawn_city_markers(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_translation(coords).with_scale(Vec3::splat(CITY_RADIUS)),
+            Transform::from_translation(bevy_km).with_scale(Vec3::splat(CITY_RADIUS)),
             CityMarker { name },
         ));
     }

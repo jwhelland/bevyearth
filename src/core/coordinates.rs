@@ -12,6 +12,8 @@ use bevy::math::{DVec3, Vec3};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::f64::consts::PI;
 
+use crate::core::space::{EARTH_RADIUS_KM_F64, bevy_to_ecef_km, ecef_to_bevy_km};
+
 pub const EARTH_RADIUS_KM: f32 = 6371.0;
 
 // ========================= Geographic coordinates and helpers =========================
@@ -31,12 +33,20 @@ pub struct Coordinates {
 
 impl From<Vec3> for Coordinates {
     fn from(value: Vec3) -> Self {
-        let n = value.normalize();
-        let y = n.y as f64;
-        let x = n.x as f64;
-        let z = n.z as f64;
-        let latitude = y.asin();
-        let longitude = x.atan2(z);
+        let ecef_km = bevy_to_ecef_km(value);
+        Coordinates::from(ecef_km)
+    }
+}
+
+impl From<DVec3> for Coordinates {
+    fn from(value: DVec3) -> Self {
+        let n = if value.length_squared() == 0.0 {
+            DVec3::ZERO
+        } else {
+            value.normalize()
+        };
+        let latitude = n.z.asin();
+        let longitude = n.y.atan2(n.x);
         Coordinates {
             latitude,
             longitude,
@@ -78,19 +88,24 @@ impl Coordinates {
         })
     }
 
+    #[allow(dead_code)]
     pub fn get_point_on_sphere(&self) -> Vec3 {
-        // Compute with f64 for pole precision, then cast to f32 (Bevy uses f32)
+        ecef_to_bevy_km(self.get_point_on_sphere_ecef_km_dvec())
+    }
+
+    pub fn get_point_on_sphere_ecef_km_dvec(&self) -> DVec3 {
+        // Compute with f64 for pole precision, then keep in f64 for canonical ECEF.
         let lat = self.latitude;
         let lon = self.longitude;
-        let y = lat.sin();
+        let z = lat.sin();
         let mut r = lat.cos();
         // Clamp residual radius near the poles to avoid mm-scale artifacts from f32 quantization of 90°
         if (std::f64::consts::FRAC_PI_2 - lat.abs()).abs() < 1e-7 {
             r = 0.0;
         }
-        let x = lon.sin() * r;
-        let z = lon.cos() * r;
-        Vec3::new(x as f32, y as f32, z as f32) * EARTH_RADIUS_KM
+        let x = lon.cos() * r;
+        let y = lon.sin() * r;
+        DVec3::new(x, y, z) * EARTH_RADIUS_KM_F64
     }
 }
 
@@ -152,19 +167,12 @@ fn map_longitude(lon: f32) -> Result<f32, CoordError> {
 
 /// True if the straight segment from city (on/near sphere surface) to satellite does NOT intersect the Earth sphere.
 /// Uses a robust segment-sphere intersection test around the origin.
-pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
-    // Promote to f64 for numerical robustness
-    let c = DVec3::new(
-        city_ecef_km.x as f64,
-        city_ecef_km.y as f64,
-        city_ecef_km.z as f64,
-    );
-    let s = DVec3::new(
-        sat_ecef_km.x as f64,
-        sat_ecef_km.y as f64,
-        sat_ecef_km.z as f64,
-    );
-    let u = s - c;
+pub fn los_visible_ecef_dvec(
+    city_ecef_km: DVec3,
+    sat_ecef_km: DVec3,
+    earth_radius_km: f64,
+) -> bool {
+    let u = sat_ecef_km - city_ecef_km;
 
     // Solve |C + t u|^2 = R^2  -> (u·u) t^2 + 2 (C·u) t + (C·C - R^2) = 0
     let a = u.length_squared();
@@ -172,9 +180,9 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
         // City and satellite at same point -> degenerate, treat as not visible
         return false;
     }
-    let b = 2.0_f64 * c.dot(u);
-    let r2 = (earth_radius_km as f64) * (earth_radius_km as f64);
-    let c_term = c.length_squared() - r2;
+    let b = 2.0_f64 * city_ecef_km.dot(u);
+    let r2 = earth_radius_km * earth_radius_km;
+    let c_term = city_ecef_km.length_squared() - r2;
 
     let discr = b * b - 4.0_f64 * a * c_term;
 
@@ -196,18 +204,12 @@ pub fn los_visible_ecef(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: 
 
 /// Cheap prefilter: city is potentially visible only if city and satellite are on the same hemisphere
 /// relative to the sphere origin. Equivalent to dot(C, S) > R^2 (both outside the tangent plane).
-pub fn hemisphere_prefilter(city_ecef_km: Vec3, sat_ecef_km: Vec3, earth_radius_km: f32) -> bool {
-    let c = DVec3::new(
-        city_ecef_km.x as f64,
-        city_ecef_km.y as f64,
-        city_ecef_km.z as f64,
-    );
-    let s = DVec3::new(
-        sat_ecef_km.x as f64,
-        sat_ecef_km.y as f64,
-        sat_ecef_km.z as f64,
-    );
-    c.dot(s) > (earth_radius_km as f64) * (earth_radius_km as f64)
+pub fn hemisphere_prefilter_ecef_dvec(
+    city_ecef_km: DVec3,
+    sat_ecef_km: DVec3,
+    earth_radius_km: f64,
+) -> bool {
+    city_ecef_km.dot(sat_ecef_km) > earth_radius_km * earth_radius_km
 }
 
 // ========================= Orbital/Earth-frame transformations =========================
@@ -292,27 +294,17 @@ pub fn gmst_rad_with_dut1(t: DateTime<Utc>, dut1_seconds: f64) -> f64 {
     s * (std::f64::consts::TAU / sec_in_day)
 }
 
-/// Remap ECEF axes to Bevy world coordinates in kilometers.
-/// Mapping: Bevy (x,y,z) = (ECEF.y, ECEF.z, ECEF.x)
-pub fn ecef_to_bevy_world_km(ecef: DVec3) -> Vec3 {
-    Vec3::new(ecef.y as f32, ecef.z as f32, ecef.x as f32)
-}
-
-/// Convert Bevy world coordinates back to ECEF coordinates (km)
-/// This is the inverse of ecef_to_bevy_world_km
-pub fn bevy_world_to_ecef_km(bevy: Vec3) -> Vec3 {
-    Vec3::new(bevy.z, bevy.x, bevy.y)
-}
-
 // =================================== Tests ===================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::space::{EARTH_RADIUS_KM_F64, bevy_to_ecef_km, ecef_to_bevy_km};
     use bevy::prelude::Vec3 as BVec3;
     use chrono::TimeZone;
 
     const EPSILON: f32 = 1e-6;
+    const EPSILON_F64: f64 = 1e-6;
 
     // ---- Geographic coordinate tests (from former crate::coord) ----
 
@@ -402,6 +394,27 @@ mod tests {
     }
 
     #[test]
+    fn test_get_point_on_sphere_ecef_axes() {
+        let coord = Coordinates::from_degrees(0.0, 0.0).unwrap();
+        let ecef = coord.get_point_on_sphere_ecef_km_dvec();
+        assert!((ecef.x - EARTH_RADIUS_KM_F64).abs() < EPSILON_F64);
+        assert!(ecef.y.abs() < EPSILON_F64);
+        assert!(ecef.z.abs() < EPSILON_F64);
+
+        let coord = Coordinates::from_degrees(0.0, 90.0).unwrap();
+        let ecef = coord.get_point_on_sphere_ecef_km_dvec();
+        assert!(ecef.x.abs() < EPSILON_F64);
+        assert!((ecef.y - EARTH_RADIUS_KM_F64).abs() < EPSILON_F64);
+        assert!(ecef.z.abs() < EPSILON_F64);
+
+        let coord = Coordinates::from_degrees(90.0, 0.0).unwrap();
+        let ecef = coord.get_point_on_sphere_ecef_km_dvec();
+        assert!(ecef.x.abs() < EPSILON_F64);
+        assert!(ecef.y.abs() < EPSILON_F64);
+        assert!((ecef.z - EARTH_RADIUS_KM_F64).abs() < EPSILON_F64);
+    }
+
+    #[test]
     fn test_map_function() {
         let result = map((0.0, 10.0), (0.0, 100.0), 5.0);
         assert!((result - 50.0).abs() < EPSILON);
@@ -456,57 +469,69 @@ mod tests {
 
     #[test]
     fn test_los_visible_ecef_clear_line_of_sight() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM * 2.0);
-        assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64 * 2.0);
+        assert!(los_visible_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64));
     }
 
     #[test]
     fn test_los_visible_ecef_blocked_by_earth() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(0.0, 0.0, -EARTH_RADIUS_KM * 2.0);
-        assert!(!los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(0.0, 0.0, -EARTH_RADIUS_KM_F64 * 2.0);
+        assert!(!los_visible_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64));
     }
 
     #[test]
     fn test_los_visible_ecef_same_position() {
-        let position = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        assert!(!los_visible_ecef(position, position, EARTH_RADIUS_KM));
+        let position = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        assert!(!los_visible_ecef_dvec(
+            position,
+            position,
+            EARTH_RADIUS_KM_F64
+        ));
     }
 
     #[test]
     fn test_los_visible_ecef_high_satellite() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM * 10.0);
-        assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64 * 10.0);
+        assert!(los_visible_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64));
     }
 
     #[test]
     fn test_los_visible_ecef_grazing_case() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(EARTH_RADIUS_KM * 2.0, 0.0, EARTH_RADIUS_KM);
-        assert!(los_visible_ecef(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(EARTH_RADIUS_KM_F64 * 2.0, 0.0, EARTH_RADIUS_KM_F64);
+        assert!(los_visible_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64));
     }
 
     #[test]
     fn test_hemisphere_prefilter_same_hemisphere() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(100.0, 100.0, EARTH_RADIUS_KM * 2.0);
-        assert!(hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(100.0, 100.0, EARTH_RADIUS_KM_F64 * 2.0);
+        assert!(hemisphere_prefilter_ecef_dvec(
+            city,
+            satellite,
+            EARTH_RADIUS_KM_F64
+        ));
     }
 
     #[test]
     fn test_hemisphere_prefilter_opposite_hemispheres() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite = BVec3::new(0.0, 0.0, -EARTH_RADIUS_KM * 2.0);
-        assert!(!hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite = DVec3::new(0.0, 0.0, -EARTH_RADIUS_KM_F64 * 2.0);
+        assert!(!hemisphere_prefilter_ecef_dvec(
+            city,
+            satellite,
+            EARTH_RADIUS_KM_F64
+        ));
     }
 
     #[test]
     fn test_hemisphere_prefilter_edge_case() {
-        let city = BVec3::new(EARTH_RADIUS_KM, 0.0, 0.0);
-        let satellite = BVec3::new(0.0, EARTH_RADIUS_KM, 0.0);
-        let result = hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM);
+        let city = DVec3::new(EARTH_RADIUS_KM_F64, 0.0, 0.0);
+        let satellite = DVec3::new(0.0, EARTH_RADIUS_KM_F64, 0.0);
+        let result = hemisphere_prefilter_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64);
         assert!(!result);
     }
 
@@ -517,6 +542,23 @@ mod tests {
         let reconstructed = coord.get_point_on_sphere().normalize();
         let diff = (original - reconstructed).length();
         assert!(diff < 1e-5);
+    }
+
+    #[test]
+    fn test_roundtrip_ecef_coordinates() {
+        let original = Coordinates::from_degrees(12.5, -45.0).unwrap();
+        let ecef = original.get_point_on_sphere_ecef_km_dvec();
+        let reconstructed = Coordinates::from(ecef);
+
+        let (orig_lat, orig_lon) = original.as_degrees();
+        let (recon_lat, recon_lon) = reconstructed.as_degrees();
+
+        assert!((orig_lat - recon_lat).abs() < 1e-4);
+        let mut lon_diff = (orig_lon - recon_lon).abs();
+        if lon_diff > 180.0 {
+            lon_diff = 360.0 - lon_diff;
+        }
+        assert!(lon_diff < 1e-4);
     }
 
     #[test]
@@ -671,27 +713,36 @@ mod tests {
 
     #[test]
     fn test_los_visible_ecef_edge_cases() {
-        let city = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM);
-        let satellite_above = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM * 2.0);
-        assert!(los_visible_ecef(city, satellite_above, EARTH_RADIUS_KM));
+        let city = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64);
+        let satellite_above = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64 * 2.0);
+        assert!(los_visible_ecef_dvec(
+            city,
+            satellite_above,
+            EARTH_RADIUS_KM_F64
+        ));
 
-        let satellite_very_far = BVec3::new(0.0, 0.0, EARTH_RADIUS_KM * 100.0);
-        assert!(los_visible_ecef(city, satellite_very_far, EARTH_RADIUS_KM));
+        let satellite_very_far = DVec3::new(0.0, 0.0, EARTH_RADIUS_KM_F64 * 100.0);
+        assert!(los_visible_ecef_dvec(
+            city,
+            satellite_very_far,
+            EARTH_RADIUS_KM_F64
+        ));
     }
 
     #[test]
     fn test_hemisphere_prefilter_edge_cases() {
-        let city = BVec3::new(EARTH_RADIUS_KM, 0.0, 0.0);
-        let satellite = BVec3::new(0.0, EARTH_RADIUS_KM, 0.0);
-        let result = hemisphere_prefilter(city, satellite, EARTH_RADIUS_KM);
+        let city = DVec3::new(EARTH_RADIUS_KM_F64, 0.0, 0.0);
+        let satellite = DVec3::new(0.0, EARTH_RADIUS_KM_F64, 0.0);
+        let result = hemisphere_prefilter_ecef_dvec(city, satellite, EARTH_RADIUS_KM_F64);
         assert!(!result);
 
-        let satellite_above = BVec3::new(EARTH_RADIUS_KM * 1.1, EARTH_RADIUS_KM * 1.1, 0.0);
-        let result_above = hemisphere_prefilter(city, satellite_above, EARTH_RADIUS_KM);
+        let satellite_above = DVec3::new(EARTH_RADIUS_KM_F64 * 1.1, EARTH_RADIUS_KM_F64 * 1.1, 0.0);
+        let result_above =
+            hemisphere_prefilter_ecef_dvec(city, satellite_above, EARTH_RADIUS_KM_F64);
         assert!(result_above);
 
-        let zero = BVec3::ZERO;
-        let result_zero = hemisphere_prefilter(zero, zero, EARTH_RADIUS_KM);
+        let zero = DVec3::ZERO;
+        let result_zero = hemisphere_prefilter_ecef_dvec(zero, zero, EARTH_RADIUS_KM_F64);
         assert!(!result_zero);
     }
 
@@ -818,14 +869,18 @@ mod tests {
     }
 
     #[test]
-    fn test_ecef_to_bevy_axis_mapping_at_gmst_zero() {
-        let eci = DVec3::new(1000.0, 0.0, 0.0);
-        let ecef = eci_to_ecef_km(eci, 0.0);
-        let bevy = ecef_to_bevy_world_km(ecef);
+    fn test_ecef_to_bevy_boundary_conversion() {
+        let ecef = DVec3::new(EARTH_RADIUS_KM_F64, 0.0, 0.0);
+        let bevy = ecef_to_bevy_km(ecef);
 
-        assert!(bevy.x.abs() < 1e-6);
-        assert!(bevy.y.abs() < 1e-6);
-        assert!((bevy.z - 1000.0).abs() < 1e-6);
+        assert!(bevy.x.abs() < EPSILON);
+        assert!(bevy.y.abs() < EPSILON);
+        assert!((bevy.z - EARTH_RADIUS_KM).abs() < EPSILON);
+
+        let roundtrip = bevy_to_ecef_km(bevy);
+        assert!((roundtrip.x - EARTH_RADIUS_KM_F64).abs() < EPSILON_F64);
+        assert!(roundtrip.y.abs() < EPSILON_F64);
+        assert!(roundtrip.z.abs() < EPSILON_F64);
     }
 
     #[test]
@@ -1006,29 +1061,29 @@ mod tests {
     }
 
     #[test]
-    fn test_ecef_to_bevy_coordinate_system_consistency() {
+    fn test_ecef_to_bevy_axis_permutation() {
         let ecef_x = DVec3::new(1000.0, 0.0, 0.0);
         let ecef_y = DVec3::new(0.0, 1000.0, 0.0);
         let ecef_z = DVec3::new(0.0, 0.0, 1000.0);
 
-        let bevy_x = ecef_to_bevy_world_km(ecef_x);
-        let bevy_y = ecef_to_bevy_world_km(ecef_y);
-        let bevy_z = ecef_to_bevy_world_km(ecef_z);
+        let bevy_x = ecef_to_bevy_km(ecef_x);
+        let bevy_y = ecef_to_bevy_km(ecef_y);
+        let bevy_z = ecef_to_bevy_km(ecef_z);
 
-        assert!((bevy_x.x - 0.0).abs() < 1e-6);
-        assert!((bevy_x.y - 0.0).abs() < 1e-6);
-        assert!((bevy_x.z - 1000.0).abs() < 1e-6);
+        assert!(bevy_x.x.abs() < EPSILON);
+        assert!(bevy_x.y.abs() < EPSILON);
+        assert!((bevy_x.z - 1000.0).abs() < EPSILON);
 
-        assert!((bevy_y.x - 1000.0).abs() < 1e-6);
-        assert!((bevy_y.y - 0.0).abs() < 1e-6);
-        assert!((bevy_y.z - 0.0).abs() < 1e-6);
+        assert!((bevy_y.x - 1000.0).abs() < EPSILON);
+        assert!(bevy_y.y.abs() < EPSILON);
+        assert!(bevy_y.z.abs() < EPSILON);
 
-        assert!((bevy_z.x - 0.0).abs() < 1e-6);
-        assert!((bevy_z.y - 1000.0).abs() < 1e-6);
-        assert!((bevy_z.z - 0.0).abs() < 1e-6);
+        assert!(bevy_z.x.abs() < EPSILON);
+        assert!((bevy_z.y - 1000.0).abs() < EPSILON);
+        assert!(bevy_z.z.abs() < EPSILON);
 
         let ecef_diagonal = DVec3::new(100.0, 200.0, 300.0);
-        let bevy_diagonal = ecef_to_bevy_world_km(ecef_diagonal);
+        let bevy_diagonal = ecef_to_bevy_km(ecef_diagonal);
 
         let ecef_length = ecef_diagonal.length();
         let bevy_length = bevy_diagonal.length() as f64;

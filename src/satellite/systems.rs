@@ -1,12 +1,12 @@
 //! Satellite systems for propagation and position updates
 
 use crate::core::coordinates::EARTH_RADIUS_KM;
+use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::orbital::{
-    Dut1, SimulationTime, ecef_to_bevy_world_km, eci_to_ecef_km, gmst_rad_with_dut1,
-    minutes_since_epoch,
+    Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
 use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{SatWorldKm, SatelliteStore, SelectedSatellite};
+use crate::satellite::resources::{SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -20,22 +20,20 @@ type CameraQuery<'w, 's> = Query<
     (With<Camera3d>, Without<Satellite>),
 >;
 
-/// System to update the satellite world-coordinate resource from satellite transforms
-pub fn update_satellite_world(
-    sat_query: Query<&Transform, With<Satellite>>,
-    mut sat_res: ResMut<SatWorldKm>,
-) {
-    if let Some(t) = sat_query.iter().next() {
-        sat_res.0 = t.translation;
-    }
-}
-
 /// System to propagate satellites using SGP4 and update their transforms
 pub fn propagate_satellites_system(
     store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
     dut1: Res<Dut1>,
-    mut q: Query<(&mut Transform, &mut SatelliteColor, Entity), With<Satellite>>,
+    mut q: Query<
+        (
+            &mut Transform,
+            &mut SatelliteColor,
+            Option<&mut WorldEcefKm>,
+        ),
+        With<Satellite>,
+    >,
+    mut commands: Commands,
 ) {
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
     for entry in store.items.values() {
@@ -46,11 +44,15 @@ pub fn propagate_satellites_system(
                 let pos = state.position; // [f64; 3] in km (TEME)
                 let eci = DVec3::new(pos[0], pos[1], pos[2]);
                 let ecef = eci_to_ecef_km(eci, gmst);
-                let bevy_pos = ecef_to_bevy_world_km(ecef);
-                if let Some((mut t, mut c, _)) =
-                    q.iter_mut().find(|(_, _, e)| Some(*e) == entry.entity)
+                if let Some(entity) = entry.entity
+                    && let Ok((mut t, mut c, world_opt)) = q.get_mut(entity)
                 {
-                    t.translation = bevy_pos;
+                    t.translation = ecef_to_bevy_km(ecef);
+                    if let Some(mut world) = world_opt {
+                        world.0 = ecef;
+                    } else {
+                        commands.entity(entity).insert(WorldEcefKm(ecef));
+                    }
                     c.0 = entry.color;
                 }
             }
@@ -104,12 +106,12 @@ pub fn update_orbit_trails_system(
     store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    mut trail_query: Query<(&mut OrbitTrail, &Transform, Entity), With<Satellite>>,
+    mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, Entity), With<Satellite>>,
     mut commands: Commands,
 ) {
     let current_time = sim_time.current_utc;
 
-    for (mut trail, transform, entity) in trail_query.iter_mut() {
+    for (mut trail, world_ecef, entity) in trail_query.iter_mut() {
         // Find the satellite entry for this entity
         if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
             // Only update trail if it's enabled for this satellite
@@ -136,7 +138,7 @@ pub fn update_orbit_trails_system(
             if should_add_point {
                 // Add new trail point
                 trail.history.push(TrailPoint {
-                    position: transform.translation,
+                    position_ecef_km: world_ecef.0,
                     timestamp: current_time,
                 });
             }
@@ -198,8 +200,10 @@ pub fn draw_orbit_trails_system(
                     alpha,
                 );
 
-                // Draw line segment
-                gizmos.line(point1.position, point2.position, trail_color);
+                // Draw line segment (convert canonical ECEF to Bevy render space)
+                let point1_bevy = ecef_to_bevy_km(point1.position_ecef_km);
+                let point2_bevy = ecef_to_bevy_km(point2.position_ecef_km);
+                gizmos.line(point1_bevy, point2_bevy, trail_color);
             }
         }
     }

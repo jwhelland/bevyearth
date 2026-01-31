@@ -4,10 +4,12 @@
 //! for better visibility on Earth's surface.
 
 use bevy::prelude::*;
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use crate::core::coordinates::EARTH_RADIUS_KM;
+use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::satellite::{Satellite, SatelliteStore};
+use bevy::math::DVec3;
 
 /// Plugin for ground track gizmo rendering and management
 pub struct GroundTrackGizmoPlugin;
@@ -112,22 +114,21 @@ impl Default for GroundTrackGizmoConfig {
 pub fn draw_ground_track_gizmos_system(
     mut gizmos: Gizmos,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    satellite_query: Query<(&Transform, &GroundTrackGizmo), With<Satellite>>,
+    satellite_query: Query<(&WorldEcefKm, &GroundTrackGizmo), With<Satellite>>,
 ) {
     if !config_bundle.gizmo_cfg.enabled || !config_bundle.ground_track_cfg.enabled {
         return;
     }
 
-    for (transform, ground_track_gizmo) in satellite_query.iter() {
+    for (world_ecef, ground_track_gizmo) in satellite_query.iter() {
         if !ground_track_gizmo.enabled {
             continue;
         }
 
-        let sat_pos = transform.translation;
         draw_satellite_ground_track_gizmo(
             &mut gizmos,
             &config_bundle.gizmo_cfg,
-            sat_pos,
+            world_ecef.0,
             config_bundle.ground_track_cfg.radius_km,
         );
     }
@@ -137,18 +138,18 @@ pub fn draw_ground_track_gizmos_system(
 fn draw_satellite_ground_track_gizmo(
     gizmos: &mut Gizmos,
     config: &GroundTrackGizmoConfig,
-    sat_ecef_km: Vec3,
+    sat_ecef_km: DVec3,
     radius_km: f32,
 ) {
     // Find the nadir point (ground projection of satellite)
-    let nadir_point = sat_ecef_km.normalize() * EARTH_RADIUS_KM;
+    let nadir_point = sat_ecef_km.normalize() * (EARTH_RADIUS_KM as f64);
 
     // Create local coordinate system at nadir point
     let up = nadir_point.normalize();
     let right = if up.y.abs() < 0.9 {
-        up.cross(Vec3::Y).normalize()
+        up.cross(DVec3::Y).normalize()
     } else {
-        up.cross(Vec3::X).normalize()
+        up.cross(DVec3::X).normalize()
     };
     let forward = right.cross(up);
 
@@ -159,7 +160,7 @@ fn draw_satellite_ground_track_gizmo(
             nadir_point,
             right,
             forward,
-            config.center_dot_size,
+            config.center_dot_size as f64,
             config.circle_color,
         );
     }
@@ -169,7 +170,7 @@ fn draw_satellite_ground_track_gizmo(
         nadir_point,
         right,
         forward,
-        radius_km,
+        radius_km as f64,
         config.circle_color,
         config.circle_segments,
     );
@@ -178,18 +179,18 @@ fn draw_satellite_ground_track_gizmo(
 /// Draw a circle on the Earth's surface
 fn draw_ground_track_circle(
     gizmos: &mut Gizmos,
-    center: Vec3,
-    right: Vec3,
-    forward: Vec3,
-    radius_km: f32,
+    center: DVec3,
+    right: DVec3,
+    forward: DVec3,
+    radius_km: f64,
     color: Color,
     segments: u32,
 ) {
-    let angle_step = 2.0 * PI / segments as f32;
+    let angle_step = 2.0 * PI / segments as f64;
     let mut points = Vec::with_capacity(segments as usize);
 
     for i in 0..segments {
-        let angle = i as f32 * angle_step;
+        let angle = i as f64 * angle_step;
         let cos_angle = angle.cos();
         let sin_angle = angle.sin();
 
@@ -202,17 +203,19 @@ fn draw_ground_track_circle(
     // Draw the circle as connected line segments
     for i in 0..segments {
         let next_i = (i + 1) % segments;
-        gizmos.line(points[i as usize], points[next_i as usize], color);
+        let p0 = ecef_to_bevy_km(points[i as usize]);
+        let p1 = ecef_to_bevy_km(points[next_i as usize]);
+        gizmos.line(p0, p1, color);
     }
 }
 
 /// Draw a small circle at the nadir point
 fn draw_center_dot(
     gizmos: &mut Gizmos,
-    center: Vec3,
-    right: Vec3,
-    forward: Vec3,
-    dot_size_km: f32,
+    center: DVec3,
+    right: DVec3,
+    forward: DVec3,
+    dot_size_km: f64,
     color: Color,
 ) {
     draw_ground_track_circle(
@@ -227,6 +230,6 @@ fn draw_center_dot(
 }
 
 /// Project a point onto the Earth's sphere surface
-fn project_to_sphere_surface(point: Vec3) -> Vec3 {
-    point.normalize() * EARTH_RADIUS_KM
+fn project_to_sphere_surface(point: DVec3) -> DVec3 {
+    point.normalize() * (EARTH_RADIUS_KM as f64)
 }

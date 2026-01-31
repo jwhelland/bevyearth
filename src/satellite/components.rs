@@ -1,5 +1,6 @@
 //! Satellite components for the Bevy ECS system
 
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use chrono::{DateTime, Utc};
 
@@ -21,8 +22,8 @@ pub struct OrbitTrail {
 /// A single point in the orbit trail
 #[derive(Clone)]
 pub struct TrailPoint {
-    /// Position in world space
-    pub position: Vec3,
+    /// Position in canonical ECEF km
+    pub position_ecef_km: DVec3,
     /// When this point was recorded
     pub timestamp: DateTime<Utc>,
 }
