@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub struct SatelliteStore {
     pub items: HashMap<u32, SatEntry>,
     pub next_color_hue: f32,
+    pub entity_by_norad: HashMap<u32, Entity>,
 }
 
 impl Default for SatelliteStore {
@@ -16,6 +17,7 @@ impl Default for SatelliteStore {
         Self {
             items: HashMap::new(),
             next_color_hue: 0.0,
+            entity_by_norad: HashMap::new(),
         }
     }
 }
@@ -97,4 +99,10 @@ impl Default for SatelliteRenderConfig {
             emissive_intensity: 20.0,
         }
     }
+}
+
+/// Shared render assets for satellites
+#[derive(Resource, Clone)]
+pub struct SatelliteRenderAssets {
+    pub sphere_mesh: Handle<Mesh>,
 }

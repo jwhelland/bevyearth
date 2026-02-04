@@ -14,6 +14,7 @@ pub struct EarthMeshHandle {
     pub handle: Handle<Mesh>,
 }
 
+
 impl Plugin for EarthPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, generate_unified_earth);
@@ -99,19 +100,22 @@ pub fn generate_unified_earth(
         handle: mesh_handle.clone(),
     });
 
+    let material_handle = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
+        metallic_roughness_texture: Some(asset_server.load("specular_map_inverted_8k.png")),
+        perceptual_roughness: 1.0,
+        unlit: false,  // PBR lighting enabled
+        ..default()
+    });
+
     commands
         .spawn((
             Mesh3d(mesh_handle),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::WHITE, // White base color allows vertex colors to show through
-                base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
-                metallic_roughness_texture: Some(asset_server.load("specular_map_inverted_8k.png")),
-                perceptual_roughness: 1.0,
-                // Use unlit mode to make vertex colors more visible
-                unlit: true,
-                ..default()
-            })),
+            MeshMaterial3d(material_handle),
             Transform::from_xyz(0.0, 0.0, 0.0),
+            Visibility::Visible,
+            Name::new("Earth"),
         ))
         .observe(|mut event: On<Pointer<Click>>| {
             let hit = &event.hit;
@@ -188,7 +192,8 @@ pub fn generate_icosphere(subdivisions: u32) -> Mesh {
     for vertex in vertex_positions {
         let normalized = vertex.normalize();
         final_vertices.push(normalized * EARTH_RADIUS_KM);
-        normals.push(-normalized); // Inward-facing normals
+        // Outward-facing normals for correct PBR lighting.
+        normals.push(normalized);
 
         // Convert to geographic coordinates for UV mapping with seam handling
         let coords: Coordinates = normalized.into();

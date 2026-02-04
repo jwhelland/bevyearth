@@ -8,6 +8,10 @@ use chrono::{DateTime, Utc};
 #[derive(Component)]
 pub struct Satellite;
 
+/// Component storing NORAD ID for a satellite entity
+#[derive(Component, Copy, Clone, Debug)]
+pub struct NoradId(pub u32);
+
 /// Component that stores the color for a satellite
 #[derive(Component)]
 pub struct SatelliteColor(pub Color);

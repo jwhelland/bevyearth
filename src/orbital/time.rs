@@ -1,7 +1,10 @@
 //! Time management for orbital mechanics
 
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use chrono::{DateTime, Duration, Utc};
+
+use crate::core::coordinates::{eci_to_ecef_km, gmst_rad_with_dut1, julian_date_utc};
 
 #[cfg(test)]
 use chrono::{Datelike, TimeZone, Timelike};
@@ -44,6 +47,36 @@ impl Default for Dut1 {
     fn default() -> Self {
         Self(0.0)
     }
+}
+
+/// Approximate sun direction in ECEF coordinates for a given UTC time.
+/// Returns a unit vector pointing from Earth to the Sun (ECEF).
+pub fn sun_direction_from_utc(utc: DateTime<Utc>, dut1_seconds: f64) -> DVec3 {
+    let jd = julian_date_utc(utc);
+    let days = jd - 2451545.0; // Days since J2000.0
+
+    let mean_long_deg = 280.460 + 0.9856474 * days;
+    let mean_anom_deg = 357.528 + 0.9856003 * days;
+
+    let mean_long = mean_long_deg.to_radians();
+    let mean_anom = mean_anom_deg.to_radians();
+
+    let ecliptic_long = mean_long
+        + (1.915_f64.to_radians() * mean_anom.sin())
+        + (0.020_f64.to_radians() * (2.0 * mean_anom).sin());
+
+    let obliquity = (23.439 - 0.0000004 * days).to_radians();
+
+    let eci = DVec3::new(
+        ecliptic_long.cos(),
+        obliquity.cos() * ecliptic_long.sin(),
+        obliquity.sin() * ecliptic_long.sin(),
+    );
+
+    let gmst = gmst_rad_with_dut1(utc, dut1_seconds);
+    let ecef = eci_to_ecef_km(eci, gmst);
+
+    ecef.normalize()
 }
 
 #[cfg(test)]

@@ -7,14 +7,14 @@
 use bevy::ecs::system::SystemParam;
 use bevy::math::DVec3;
 use bevy::prelude::*;
+use bevy::tasks::{ComputeTaskPool, Task, block_on};
 use std::time::Instant;
 
 use crate::core::coordinates::{
     EARTH_RADIUS_KM, hemisphere_prefilter_ecef_dvec, los_visible_ecef_dvec,
 };
 use crate::core::space::{WorldEcefKm, bevy_to_ecef_km};
-use crate::orbital::SimulationTime;
-use crate::satellite::{Satellite, SatelliteStore};
+use crate::satellite::Satellite;
 use crate::visualization::colormaps::turbo_colormap;
 use crate::visualization::earth::EarthMeshHandle;
 
@@ -75,12 +75,12 @@ pub struct HeatmapState {
     pub vertex_counts: Vec<u32>,
     /// Computed color buffer for vertices
     pub color_buffer: Vec<[f32; 4]>,
-    /// Current chunk index for progressive updates
-    pub current_chunk: usize,
     /// Vertex positions (cached for performance)
     pub vertex_positions: Vec<Vec3>,
     /// Whether vertex positions have been cached
     pub positions_cached: bool,
+    /// In-flight async task for computing visibility counts
+    pub pending_task: Option<Task<Vec<u32>>>,
 }
 
 #[derive(SystemParam)]
@@ -88,8 +88,6 @@ struct HeatmapParams<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     satellite_query: Query<'w, 's, &'static WorldEcefKm, With<Satellite>>,
-    satellite_store: Res<'w, SatelliteStore>,
-    sim_time: Res<'w, SimulationTime>,
     heatmap_query: Query<
         'w,
         's,
@@ -105,9 +103,9 @@ impl Default for HeatmapState {
             earth_mesh_handle: None,
             vertex_counts: Vec::new(),
             color_buffer: Vec::new(),
-            current_chunk: 0,
             vertex_positions: Vec::new(),
             positions_cached: false,
+            pending_task: None,
         }
     }
 }
@@ -204,6 +202,8 @@ fn create_heatmap_overlay(
         Mesh3d(overlay_mesh_handle.clone()),
         MeshMaterial3d(heatmap_material),
         Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(1.001)), // Slightly larger to sit on top
+        // Keep this from affecting the scene when heatmap is disabled.
+        Visibility::Hidden,
         HeatmapOverlay, // Mark this entity as the heatmap overlay
     ));
 
@@ -220,8 +220,6 @@ fn update_heatmap_system(
         mut meshes,
         mut materials,
         satellite_query,
-        satellite_store,
-        sim_time,
         heatmap_query,
     } = params;
 
@@ -230,11 +228,6 @@ fn update_heatmap_system(
     }
 
     if state.earth_mesh_handle.is_none() {
-        return;
-    }
-
-    // Check update timing
-    if state.last_update_instant.elapsed().as_secs_f32() < config.update_period_s {
         return;
     }
 
@@ -263,8 +256,7 @@ fn update_heatmap_system(
     }
 
     // Collect current satellite positions in ECEF
-    let satellite_positions_ecef: Vec<DVec3> =
-        collect_satellite_positions_ecef(&satellite_query, &satellite_store, &sim_time);
+    let satellite_positions_ecef: Vec<DVec3> = collect_satellite_positions_ecef(&satellite_query);
 
     if satellite_positions_ecef.is_empty() {
         // No satellites - completely hide the heatmap overlay
@@ -279,66 +271,50 @@ fn update_heatmap_system(
         return;
     }
 
-    // Process vertices in chunks
-    let vertex_count = state.vertex_positions.len();
-    let chunk_size = config.chunk_size;
+    // Spawn new async task if ready
+    if state.pending_task.is_none()
+        && state.last_update_instant.elapsed().as_secs_f32() >= config.update_period_s
+    {
+        let positions = state.vertex_positions.clone();
+        let satellites = satellite_positions_ecef.clone();
+        let earth_radius = EARTH_RADIUS_KM as f64;
 
-    for _ in 0..config.chunks_per_frame {
-        let start_idx = state.current_chunk * chunk_size;
-        if start_idx >= vertex_count {
-            // Completed full pass - apply colors and reset
-            let vertex_counts = state.vertex_counts.clone();
-            apply_colors_to_mesh(
-                mesh,
-                &vertex_counts,
-                &config,
-                state.color_buffer.as_mut_slice(),
-            );
-
-            // Update the material alpha to make heatmap visible (only if enabled)
-            if let Some(material) = materials.get_mut(&material3d.0) {
-                if config.enabled {
-                    material.base_color.set_alpha(1.0);
-                } else {
-                    material.base_color.set_alpha(0.0);
-                }
+        let task = ComputeTaskPool::get().spawn(async move {
+            let mut counts = vec![0u32; positions.len()];
+            for (i, vertex_pos) in positions.iter().enumerate() {
+                let surface_point_bevy = vertex_pos.normalize() * EARTH_RADIUS_KM;
+                let surface_point_ecef = bevy_to_ecef_km(surface_point_bevy);
+                counts[i] =
+                    count_visible_satellites(&surface_point_ecef, &satellites, earth_radius);
             }
+            counts
+        });
 
-            state.current_chunk = 0;
-            state.last_update_instant = Instant::now();
-            break;
+        state.pending_task = Some(task);
+        state.last_update_instant = Instant::now();
+    }
+
+    // Poll task completion
+    if let Some(task) = state.pending_task.take() {
+        if task.is_finished() {
+            let counts = block_on(task);
+            state.vertex_counts = counts;
+            let counts = state.vertex_counts.clone();
+
+            apply_colors_to_mesh(mesh, &counts, &config, state.color_buffer.as_mut_slice());
+
+            if let Some(material) = materials.get_mut(&material3d.0) {
+                material.base_color.set_alpha(1.0);
+            }
+        } else {
+            state.pending_task = Some(task);
         }
-
-        let end_idx = (start_idx + chunk_size).min(vertex_count);
-
-        // Update visibility counts for this chunk
-        for i in start_idx..end_idx {
-            let vertex_pos = state.vertex_positions[i];
-
-            // Ensure we use the outward-facing surface point (Earth mesh has inward-facing normals)
-            let surface_point_bevy = vertex_pos.normalize() * EARTH_RADIUS_KM;
-
-            // Convert from Bevy world coordinates to ECEF for visibility calculation
-            let surface_point_ecef = bevy_to_ecef_km(surface_point_bevy);
-
-            // Calculate actual satellite visibility from this surface point in ECEF
-            let visible_count = count_visible_satellites(
-                &surface_point_ecef,
-                &satellite_positions_ecef,
-                EARTH_RADIUS_KM as f64,
-            );
-            state.vertex_counts[i] = visible_count;
-        }
-
-        state.current_chunk += 1;
     }
 }
 
 /// Collect satellite positions in ECEF coordinates
 fn collect_satellite_positions_ecef(
     satellite_query: &Query<&WorldEcefKm, With<Satellite>>,
-    _satellite_store: &SatelliteStore,
-    _sim_time: &SimulationTime,
 ) -> Vec<DVec3> {
     satellite_query
         .iter()
@@ -407,8 +383,16 @@ fn apply_colors_to_mesh(
         }
     }
 
-    // Apply colors to mesh
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_buffer.to_vec());
+    // Apply colors to mesh in place when possible
+    if let Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR)
+    {
+        for (dst, src) in colors.iter_mut().zip(color_buffer.iter()) {
+            *dst = *src;
+        }
+    } else {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_buffer.to_vec());
+    }
 }
 
 /// Toggle heatmap overlay visibility based on config
@@ -416,16 +400,21 @@ fn toggle_heatmap_visibility(
     config: Res<HeatmapConfig>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    heatmap_query: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>), With<HeatmapOverlay>>,
+    mut heatmap_query: Query<
+        (&Mesh3d, &MeshMaterial3d<StandardMaterial>, &mut Visibility),
+        With<HeatmapOverlay>,
+    >,
 ) {
     if config.is_changed()
-        && let Ok((mesh3d, material3d)) = heatmap_query.single()
+        && let Ok((mesh3d, material3d, mut visibility)) = heatmap_query.single_mut()
         && let Some(material) = materials.get_mut(&material3d.0)
     {
         if config.enabled {
+            *visibility = Visibility::Visible;
             // Enable heatmap - make material visible
             material.base_color.set_alpha(1.0);
         } else {
+            *visibility = Visibility::Hidden;
             // Disable heatmap - hide completely
             material.base_color.set_alpha(0.0);
 

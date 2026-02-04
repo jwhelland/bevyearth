@@ -189,6 +189,7 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
 ];
 
 /// Get display name for a group
+#[allow(dead_code)]
 pub fn get_group_display_name(group: &str) -> &str {
     SATELLITE_GROUPS
         .iter()

@@ -5,8 +5,8 @@ use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::orbital::{
     Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
-use crate::satellite::components::{OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{SatelliteStore, SelectedSatellite};
+use crate::satellite::components::{NoradId, OrbitTrail, Satellite, SatelliteColor, TrailPoint};
+use crate::satellite::resources::{SatelliteRenderAssets, SatelliteStore, SelectedSatellite};
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -19,6 +19,14 @@ type CameraQuery<'w, 's> = Query<
     (&'static mut PanOrbitCamera, &'static mut Transform),
     (With<Camera3d>, Without<Satellite>),
 >;
+
+/// Create shared satellite render assets
+pub fn init_satellite_render_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
+    let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
+    commands.insert_resource(SatelliteRenderAssets {
+        sphere_mesh: meshes.add(mesh),
+    });
+}
 
 /// System to propagate satellites using SGP4 and update their transforms
 pub fn propagate_satellites_system(
@@ -64,8 +72,8 @@ pub fn propagate_satellites_system(
 pub fn spawn_missing_satellite_entities_system(
     mut store: ResMut<SatelliteStore>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    render_assets: Res<SatelliteRenderAssets>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
 ) {
     let mut satellites_to_spawn = Vec::new();
@@ -80,23 +88,26 @@ pub fn spawn_missing_satellite_entities_system(
     // Spawn entities for satellites that need them
     for norad in satellites_to_spawn {
         if let Some(entry) = store.items.get_mut(&norad) {
-            let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
             let entity = commands
                 .spawn((
-                    Mesh3d(meshes.add(mesh)),
+                    Mesh3d(render_assets.sphere_mesh.clone()),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         // base_color: entry.color,
                         emissive: entry.color.to_linear()
                             * config_bundle.render_cfg.emissive_intensity,
                         ..Default::default()
                     })),
+                    NoradId(norad),
                     Satellite,
                     SatelliteColor(entry.color),
                     Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
                         .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
+                    Visibility::Visible,
+                    Name::new(format!("Satellite {norad}")),
                 ))
                 .id();
             entry.entity = Some(entity);
+            store.entity_by_norad.insert(norad, entity);
         }
     }
 }
@@ -106,14 +117,13 @@ pub fn update_orbit_trails_system(
     store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, Entity), With<Satellite>>,
+    mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, &NoradId), With<Satellite>>,
     mut commands: Commands,
 ) {
     let current_time = sim_time.current_utc;
 
-    for (mut trail, world_ecef, entity) in trail_query.iter_mut() {
-        // Find the satellite entry for this entity
-        if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
+    for (mut trail, world_ecef, norad) in trail_query.iter_mut() {
+        if let Some(entry) = store.items.get(&norad.0) {
             // Only update trail if it's enabled for this satellite
             if !entry.show_trail {
                 // Clear trail if disabled
@@ -166,12 +176,11 @@ pub fn update_orbit_trails_system(
 /// System to draw orbit trails using gizmos
 pub fn draw_orbit_trails_system(
     store: Res<SatelliteStore>,
-    trail_query: Query<(&OrbitTrail, Entity), With<Satellite>>,
+    trail_query: Query<(&OrbitTrail, &NoradId), With<Satellite>>,
     mut gizmos: Gizmos,
 ) {
-    for (trail, entity) in trail_query.iter() {
-        // Find the satellite entry for this entity to get color and settings
-        if let Some(entry) = store.items.values().find(|e| e.entity == Some(entity)) {
+    for (trail, norad) in trail_query.iter() {
+        if let Some(entry) = store.items.get(&norad.0) {
             if !entry.show_trail || trail.history.len() < 2 {
                 continue;
             }
@@ -217,54 +226,50 @@ pub fn move_camera_to_satellite(
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
     if let Some(norad) = selected.selected.take() {
-        if let Some(entry) = store.items.get(&norad) {
-            if let Some(entity) = entry.entity {
-                if let Ok(sat_transform) = q_sat.get(entity) {
-                    let sat_pos = sat_transform.translation;
+        if let Some(&entity) = store.entity_by_norad.get(&norad) {
+            if let Ok(sat_transform) = q_sat.get(entity) {
+                let sat_pos = sat_transform.translation;
 
-                    let dir = sat_pos.normalize();
-                    let offset = 5000.0; // km
-                    let new_pos = dir * (sat_pos.length() + offset);
-                    let new_radius = new_pos.length();
+                let dir = sat_pos.normalize();
+                let offset = 5000.0; // km
+                let new_pos = dir * (sat_pos.length() + offset);
+                let new_radius = new_pos.length();
 
-                    // Compute pitch and yaw from direction
-                    let direction = new_pos.normalize();
-                    let pitch = direction.y.asin();
-                    let yaw = direction.x.atan2(direction.z);
+                // Compute pitch and yaw from direction
+                let direction = new_pos.normalize();
+                let pitch = direction.y.asin();
+                let yaw = direction.x.atan2(direction.z);
 
-                    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-                        // Force immediate camera position without smooth transition
-                        poc.focus = Vec3::ZERO;
+                if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
+                    // Force immediate camera position without smooth transition
+                    poc.focus = Vec3::ZERO;
 
-                        // Set target values first
-                        poc.target_radius = new_radius;
-                        poc.target_pitch = pitch;
-                        poc.target_yaw = yaw;
+                    // Set target values first
+                    poc.target_radius = new_radius;
+                    poc.target_pitch = pitch;
+                    poc.target_yaw = yaw;
 
-                        // Force immediate update by setting current values too
-                        poc.radius = Some(new_radius);
-                        poc.pitch = Some(pitch);
-                        poc.yaw = Some(yaw);
+                    // Force immediate update by setting current values too
+                    poc.radius = Some(new_radius);
+                    poc.pitch = Some(pitch);
+                    poc.yaw = Some(yaw);
 
-                        // Force immediate update
-                        poc.force_update = true;
+                    // Force immediate update
+                    poc.force_update = true;
 
-                        // Also directly update the camera transform as a backup
-                        let camera_pos = Vec3::new(
-                            new_radius * pitch.cos() * yaw.sin(),
-                            new_radius * pitch.sin(),
-                            new_radius * pitch.cos() * yaw.cos(),
-                        );
-                        cam_transform.translation = camera_pos;
-                        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-                    } else {
-                        println!("[CAMERA] Failed to get camera");
-                    }
+                    // Also directly update the camera transform as a backup
+                    let camera_pos = Vec3::new(
+                        new_radius * pitch.cos() * yaw.sin(),
+                        new_radius * pitch.sin(),
+                        new_radius * pitch.cos() * yaw.cos(),
+                    );
+                    cam_transform.translation = camera_pos;
+                    cam_transform.look_at(Vec3::ZERO, Vec3::Y);
                 } else {
-                    println!("[CAMERA] Failed to get satellite transform");
+                    println!("[CAMERA] Failed to get camera");
                 }
             } else {
-                println!("[CAMERA] No entity for satellite");
+                println!("[CAMERA] Failed to get satellite transform");
             }
         } else {
             println!("[CAMERA] No satellite found for norad={}", norad);
@@ -284,8 +289,7 @@ pub fn track_satellite_continuously(
 ) {
     // Only track if we have a tracking target
     if let Some(tracking_norad) = tracking.tracking
-        && let Some(entry) = store.items.get(&tracking_norad)
-        && let Some(entity) = entry.entity
+        && let Some(&entity) = store.entity_by_norad.get(&tracking_norad)
         && let Ok(sat_transform) = q_sat.get(entity)
     {
         let sat_pos = sat_transform.translation;
@@ -359,30 +363,25 @@ pub fn track_satellite_continuously(
 pub fn satellite_click_system(
     mut store: ResMut<SatelliteStore>,
     mut click_events: MessageReader<Pointer<Click>>,
-    satellite_query: Query<Entity, With<Satellite>>,
+    norad_query: Query<&NoradId, With<Satellite>>,
 ) {
     for event in click_events.read() {
         let clicked_entity = event.entity;
 
         // Check if the clicked entity is a satellite
-        if satellite_query.contains(clicked_entity) {
+        if let Ok(norad) = norad_query.get(clicked_entity) {
             // First, clear the clicked status from all satellites
             for entry in store.items.values_mut() {
                 entry.is_clicked = false;
             }
 
-            // Find the corresponding satellite entry by entity and mark it as clicked
-            if let Some((norad, entry)) = store
-                .items
-                .iter_mut()
-                .find(|(_, entry)| entry.entity == Some(clicked_entity))
-            {
+            if let Some(entry) = store.items.get_mut(&norad.0) {
                 entry.is_clicked = true;
 
                 info!(
                     "Clicked satellite: {} (NORAD: {})",
                     entry.name.as_deref().unwrap_or("Unnamed"),
-                    norad
+                    norad.0
                 );
             }
         }
