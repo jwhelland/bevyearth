@@ -1,6 +1,5 @@
 // Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
 
-use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::GlobalAmbientLight;
 use bevy::light::SunDisk;
@@ -95,11 +94,13 @@ pub fn setup(
         },
         pan_orbit,
         MainCamera,
+        /* Skybox moved to custom entity in ui/skybox.rs
         Skybox {
             image: skybox_handle.clone(),
             brightness: 500.0,  // Adjusted for visibility
             ..default()
         },
+        */
         Tonemapping::TonyMcMapface,
         // Note: Bloom is intentionally disabled - it causes rendering issues with PanOrbitCamera
         Transform::from_xyz(0.0, 0.0, initial_distance).looking_at(Vec3::ZERO, Vec3::Y),
