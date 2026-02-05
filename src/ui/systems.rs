@@ -30,6 +30,7 @@ use bevy_ui_widgets::{
     Activate, Slider, SliderPrecision, SliderRange, SliderStep, SliderValue, ValueChange,
     checkbox_self_update, slider_self_update,
 };
+use std::time::{Duration, Instant};
 
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
@@ -57,6 +58,7 @@ struct UiEntities {
     top_panel: Entity,
     bottom_panel: Entity,
     satellite_list: Entity,
+    hidden_panels_hint: Entity,
 }
 
 #[derive(Component)]
@@ -78,6 +80,15 @@ struct SatelliteList;
 struct GroupList;
 
 #[derive(Component)]
+struct HiddenPanelsHint;
+
+#[derive(Resource, Default)]
+struct HiddenPanelsHintState {
+    last_shown: Option<Instant>,
+    visible: bool,
+}
+
+#[derive(Component)]
 struct RightPanelResizeHandle;
 
 #[derive(Component)]
@@ -88,6 +99,9 @@ pub struct MainCamera;
 
 #[derive(Component)]
 struct TimeText;
+
+#[derive(Component)]
+struct HiddenPanelsHintCard;
 
 fn queue_set_checked(commands: &mut Commands, entity: Entity, checked: bool) {
     commands
@@ -244,6 +258,8 @@ const TOP_PANEL_HEIGHT_PX: f32 = 52.0;
 const BOTTOM_PANEL_HEIGHT_PX: f32 = 32.0;
 const GRID_LINE: Color = Color::srgba(0.1, 0.6, 0.7, 0.10);
 const GRID_STEPS: [f32; 9] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0];
+const HIDDEN_PANELS_HINT_DURATION: Duration = Duration::from_secs(5);
+const HIDDEN_PANELS_HINT_OFFSET_X_PX: f32 = 120.0;
 
 #[derive(Clone, Copy)]
 enum Edge {
@@ -282,7 +298,8 @@ pub struct UiSystemsPlugin;
 
 impl Plugin for UiSystemsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<HiddenPanelsHintState>()
+            .add_systems(
             Startup,
             (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
         )
@@ -292,6 +309,7 @@ impl Plugin for UiSystemsPlugin {
                 toggle_panels_keyboard,
                 apply_panel_visibility,
                 apply_panel_layout,
+                update_hidden_panels_hint,
                 sync_panel_toggle_buttons,
                 scroll_right_panel_on_wheel,
                 update_time_display,
@@ -550,6 +568,11 @@ fn setup_ui(
     commands.entity(root).add_child(right_panel);
     commands.entity(root).add_child(top_panel);
     commands.entity(root).add_child(bottom_panel);
+
+    let mut hidden_panels_hint = Entity::PLACEHOLDER;
+    commands.entity(root).with_children(|parent| {
+        hidden_panels_hint = spawn_hidden_panels_hint(parent);
+    });
 
     commands.entity(left_panel).with_children(|panel| {
         spawn_edge_glow(panel, Edge::Right);
@@ -1210,6 +1233,7 @@ fn setup_ui(
         top_panel,
         bottom_panel,
         satellite_list,
+        hidden_panels_hint,
     });
 }
 
@@ -1481,6 +1505,62 @@ fn spawn_top_panel_toggles_row(parent: &mut ChildSpawnerCommands) {
                 "Status",
             );
         });
+}
+
+fn spawn_hidden_panels_hint(parent: &mut ChildSpawnerCommands) -> Entity {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Auto,
+                justify_content: JustifyContent::FlexStart,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(Val::Px(12.0)),
+                display: Display::None,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+            HiddenPanelsHint,
+        ))
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        margin: UiRect::left(Val::Px(HIDDEN_PANELS_HINT_OFFSET_X_PX)),
+                        max_width: Val::Px(360.0),
+                        border_radius: BorderRadius::all(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(PANEL_INNER_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    Pickable::IGNORE,
+                    ThemedText,
+                    HiddenPanelsHintCard,
+                ))
+                .with_children(|card| {
+                    spawn_styled_text(card, "Panels hidden", LabelStyle::accent(15.0), ());
+                    spawn_styled_text(
+                        card,
+                        "H=Vis, J=Sat, K=Time, L=Status",
+                        LabelStyle::normal(12.0),
+                        (),
+                    );
+                    spawn_styled_text(
+                        card,
+                        "V = Toggle viewport crop",
+                        LabelStyle::normal(11.0),
+                        (),
+                    );
+                });
+        })
+        .id()
 }
 
 fn spawn_section(
@@ -1836,6 +1916,39 @@ fn apply_panel_layout(
         node.top = top;
         node.bottom = bottom;
         node.width = Val::Px(layout.right_panel_width_px);
+    }
+}
+
+fn update_hidden_panels_hint(
+    ui_state: Res<UIState>,
+    ui_entities: Res<UiEntities>,
+    mut hint_state: ResMut<HiddenPanelsHintState>,
+    mut nodes: Query<&mut Node, With<HiddenPanelsHint>>,
+) {
+    let all_hidden = !ui_state.show_left_panel
+        && !ui_state.show_right_panel
+        && !ui_state.show_top_panel
+        && !ui_state.show_bottom_panel;
+
+    let Ok(mut node) = nodes.get_mut(ui_entities.hidden_panels_hint) else {
+        return;
+    };
+
+    if all_hidden {
+        if !hint_state.visible {
+            hint_state.visible = true;
+            hint_state.last_shown = Some(Instant::now());
+            node.display = Display::Flex;
+        } else if let Some(shown_at) = hint_state.last_shown
+            && shown_at.elapsed() > HIDDEN_PANELS_HINT_DURATION
+        {
+            hint_state.visible = false;
+            node.display = Display::None;
+        }
+    } else if hint_state.visible || hint_state.last_shown.is_some() {
+        hint_state.visible = false;
+        hint_state.last_shown = None;
+        node.display = Display::None;
     }
 }
 
