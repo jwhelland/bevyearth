@@ -252,6 +252,31 @@ enum Edge {
     Right,
 }
 
+#[derive(Clone, Copy)]
+struct LabelStyle {
+    font_size: f32,
+    color: Option<Color>,
+    bold: bool,
+}
+
+impl LabelStyle {
+    fn normal(font_size: f32) -> Self {
+        Self {
+            font_size,
+            color: None,
+            bold: false,
+        }
+    }
+
+    fn accent(font_size: f32) -> Self {
+        Self {
+            font_size,
+            color: Some(PANEL_TEXT_ACCENT),
+            bold: true,
+        }
+    }
+}
+
 /// Plugin that registers UI systems and observers
 pub struct UiSystemsPlugin;
 
@@ -1155,130 +1180,9 @@ fn setup_ui(
 
     // Top panel contents
     commands.entity(top_panel).with_children(|parent| {
-        parent
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    width: Val::Px(220.0),
-                    flex_grow: 0.0,
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ThemedText,
-            ))
-            .with_children(|left| {
-                left.spawn((
-                    Node {
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(8.0)),
-                        ..default()
-                    },
-                    BackgroundColor(PANEL_INNER_BG),
-                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
-                    Pickable::IGNORE,
-                    ThemedText,
-                ))
-                .with_children(|chip| {
-                    chip.spawn((
-                        TimeText,
-                        bevy::ui::widget::Text::new("UTC: --"),
-                        ThemedText,
-                        TextFont {
-                            font_size: 15.0,
-                            ..default()
-                        },
-                    ));
-                });
-            });
-
-        parent
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    width: Val::Px(240.0),
-                    flex_grow: 0.0,
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ThemedText,
-            ))
-            .with_children(|middle| {
-                spawn_speed_slider(middle, sim_time.time_scale);
-                middle
-                    .spawn(Node {
-                        width: Val::Px(56.0),
-                        flex_grow: 0.0,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    })
-                    .with_children(|container| {
-                        container
-                            .spawn(button(
-                                ButtonProps::default(),
-                                (
-                                    ButtonAction::TimeScale1x,
-                                    AutoDirectionalNavigation::default(),
-                                ),
-                                Spawn((
-                                    bevy::ui::widget::Text::new("1x"),
-                                    ThemedText,
-                                    TextFont {
-                                        font_size: 12.0,
-                                        ..default()
-                                    },
-                                )),
-                            ))
-                            .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
-                    });
-
-                middle
-                    .spawn(Node {
-                        width: Val::Px(64.0),
-                        flex_grow: 0.0,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    })
-                    .with_children(|container| {
-                        container
-                            .spawn(button(
-                                ButtonProps::default(),
-                                (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
-                                Spawn((
-                                    bevy::ui::widget::Text::new("Now"),
-                                    ThemedText,
-                                    TextFont {
-                                        font_size: 12.0,
-                                        ..default()
-                                    },
-                                )),
-                            ))
-                            .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
-                    });
-            });
-
-        parent
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ThemedText,
-            ))
-            .with_children(|right| {
-                spawn_panel_toggle_button(right, "Vis", PanelToggleKind::Left);
-                spawn_panel_toggle_button(right, "Sat", PanelToggleKind::Right);
-                spawn_panel_toggle_button(right, "Time", PanelToggleKind::Top);
-                spawn_panel_toggle_button(right, "Status", PanelToggleKind::Bottom);
-            });
+        spawn_top_time_row(parent);
+        spawn_top_speed_row(parent, sim_time.time_scale);
+        spawn_top_panel_toggles_row(parent);
     });
 
     // Bottom panel contents
@@ -1318,6 +1222,79 @@ fn spawn_labeled_slider(
     value: f32,
     step: f32,
 ) {
+    spawn_labeled_slider_row(
+        parent,
+        label,
+        LabelStyle::normal(12.0),
+        binding,
+        min,
+        max,
+        value,
+        step,
+    );
+}
+
+fn spawn_styled_text<B: Bundle>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    style: LabelStyle,
+    extra: B,
+) {
+    let text = bevy::ui::widget::Text::new(label);
+    let font = TextFont {
+        font_size: style.font_size,
+        ..default()
+    };
+
+    match (style.color, style.bold) {
+        (Some(color), true) => {
+            parent.spawn((extra, text, ThemedText, font, TextColor(color), UiFontBold));
+        }
+        (Some(color), false) => {
+            parent.spawn((extra, text, ThemedText, font, TextColor(color)));
+        }
+        (None, true) => {
+            parent.spawn((extra, text, ThemedText, font, UiFontBold));
+        }
+        (None, false) => {
+            parent.spawn((extra, text, ThemedText, font));
+        }
+    }
+}
+
+fn spawn_pill_chip<B: Bundle>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    style: LabelStyle,
+    extra: B,
+) {
+    parent
+        .spawn((
+            Node {
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(PANEL_INNER_BG),
+            Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|chip| {
+            spawn_styled_text(chip, label, style, extra);
+        });
+}
+
+fn spawn_labeled_slider_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    label_style: LabelStyle,
+    binding: SliderBinding,
+    min: f32,
+    max: f32,
+    value: f32,
+    step: f32,
+) {
     let precision = slider_precision_from_step(step);
     parent
         .spawn((
@@ -1332,14 +1309,7 @@ fn spawn_labeled_slider(
             ThemedText,
         ))
         .with_children(|row| {
-            row.spawn((
-                bevy::ui::widget::Text::new(label),
-                ThemedText,
-                TextFont {
-                    font_size: 12.0,
-                    ..default()
-                },
-            ));
+            spawn_styled_text(row, label, label_style, ());
             row.spawn((slider(
                 SliderProps { value, min, max },
                 (
@@ -1352,54 +1322,16 @@ fn spawn_labeled_slider(
         });
 }
 
-fn spawn_speed_slider(parent: &mut ChildSpawnerCommands, value: f32) {
-    parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                width: Val::Percent(100.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-            ThemedText,
-        ))
-        .with_children(|row| {
-            row.spawn((
-                bevy::ui::widget::Text::new("Speed"),
-                ThemedText,
-                TextFont {
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(PANEL_TEXT_ACCENT),
-                UiFontBold,
-            ));
-            row.spawn((slider(
-                SliderProps {
-                    value,
-                    min: 1.0,
-                    max: 1000.0,
-                },
-                (
-                    SliderBinding::TimeScale,
-                    SliderStep(1.0),
-                    SliderPrecision(0),
-                    AutoDirectionalNavigation::default(),
-                ),
-            ),));
-        });
-}
-
-fn spawn_panel_toggle_button(
+fn spawn_fixed_button<B: Bundle>(
     parent: &mut ChildSpawnerCommands,
+    width_px: f32,
+    props: ButtonProps,
+    overrides: B,
     label: &str,
-    kind: PanelToggleKind,
 ) {
     parent
         .spawn(Node {
-            width: Val::Px(64.0),
+            width: Val::Px(width_px),
             flex_grow: 0.0,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -1408,8 +1340,8 @@ fn spawn_panel_toggle_button(
         .with_children(|container| {
             container
                 .spawn(button(
-                    ButtonProps::default(),
-                    (PanelToggle { kind }, AutoDirectionalNavigation::default()),
+                    props,
+                    overrides,
                     Spawn((
                         bevy::ui::widget::Text::new(label),
                         ThemedText,
@@ -1420,6 +1352,134 @@ fn spawn_panel_toggle_button(
                     )),
                 ))
                 .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
+        });
+}
+
+fn spawn_top_time_row(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                width: Val::Px(220.0),
+                flex_grow: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|left| {
+            spawn_pill_chip(left, "UTC: --", LabelStyle::normal(15.0), TimeText);
+        });
+}
+
+fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                width: Val::Px(240.0),
+                flex_grow: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|middle| {
+            spawn_labeled_slider_row(
+                middle,
+                "Speed",
+                LabelStyle::accent(12.0),
+                SliderBinding::TimeScale,
+                1.0,
+                1000.0,
+                time_scale,
+                1.0,
+            );
+            spawn_fixed_button(
+                middle,
+                56.0,
+                ButtonProps::default(),
+                (
+                    ButtonAction::TimeScale1x,
+                    AutoDirectionalNavigation::default(),
+                ),
+                "1x",
+            );
+            spawn_fixed_button(
+                middle,
+                64.0,
+                ButtonProps::default(),
+                (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
+                "Now",
+            );
+        });
+}
+
+fn spawn_top_panel_toggles_row(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|right| {
+            spawn_fixed_button(
+                right,
+                64.0,
+                ButtonProps::default(),
+                (
+                    PanelToggle {
+                        kind: PanelToggleKind::Left,
+                    },
+                    AutoDirectionalNavigation::default(),
+                ),
+                "Vis",
+            );
+            spawn_fixed_button(
+                right,
+                64.0,
+                ButtonProps::default(),
+                (
+                    PanelToggle {
+                        kind: PanelToggleKind::Right,
+                    },
+                    AutoDirectionalNavigation::default(),
+                ),
+                "Sat",
+            );
+            spawn_fixed_button(
+                right,
+                64.0,
+                ButtonProps::default(),
+                (
+                    PanelToggle {
+                        kind: PanelToggleKind::Top,
+                    },
+                    AutoDirectionalNavigation::default(),
+                ),
+                "Time",
+            );
+            spawn_fixed_button(
+                right,
+                64.0,
+                ButtonProps::default(),
+                (
+                    PanelToggle {
+                        kind: PanelToggleKind::Bottom,
+                    },
+                    AutoDirectionalNavigation::default(),
+                ),
+                "Status",
+            );
         });
 }
 
