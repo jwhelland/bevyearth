@@ -25,7 +25,8 @@ pub struct Cubemap {
 }
 
 const SKYBOX_YAW_OFFSET_DEG: f32 = 0.0;
-const SKYBOX_PITCH_OFFSET_DEG: f32 = 90.0;
+// Approximate tilt of the Milky Way's galactic plane relative to Earth's equator.
+const SKYBOX_PITCH_OFFSET_DEG: f32 = 62.6;
 const SKYBOX_ROLL_OFFSET_DEG: f32 = 0.0;
 
 fn asset_loaded(
