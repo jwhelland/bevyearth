@@ -14,7 +14,6 @@ pub struct EarthMeshHandle {
     pub handle: Handle<Mesh>,
 }
 
-
 impl Plugin for EarthPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, generate_unified_earth);
@@ -105,7 +104,7 @@ pub fn generate_unified_earth(
         base_color_texture: Some(asset_server.load("world_shaded_32k.png")),
         metallic_roughness_texture: Some(asset_server.load("specular_map_inverted_8k.png")),
         perceptual_roughness: 1.0,
-        unlit: false,  // PBR lighting enabled
+        unlit: false, // PBR lighting enabled
         ..default()
     });
 

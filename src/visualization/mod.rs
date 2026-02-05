@@ -33,14 +33,15 @@ pub struct VisualizationPlugin;
 
 impl Plugin for VisualizationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ArrowConfig>().add_systems(
-            Update,
-            (
-                draw_axes,
-                draw_city_to_satellite_arrows,
-                lighting::update_sun_light_direction,
-            ),
-        )
-        .add_plugins(SkyMaterialPlugin);
+        app.init_resource::<ArrowConfig>()
+            .add_systems(
+                Update,
+                (
+                    draw_axes,
+                    draw_city_to_satellite_arrows,
+                    lighting::update_sun_light_direction,
+                ),
+            )
+            .add_plugins(SkyMaterialPlugin);
     }
 }

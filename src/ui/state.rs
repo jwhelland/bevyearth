@@ -18,7 +18,7 @@ impl Default for UIState {
         Self {
             show_axes: false,
             show_left_panel: false,
-            show_right_panel: true,
+            show_right_panel: false,
             show_top_panel: true,
             show_bottom_panel: true,
             // Default off until we're confident viewport cropping math is stable across DPI / UI scale.

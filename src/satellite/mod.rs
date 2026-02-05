@@ -9,10 +9,9 @@ pub mod components;
 pub mod resources;
 pub mod systems;
 
-pub use components::{NoradId, Satellite, SatelliteColor};
+pub use components::{Satellite, SatelliteColor};
 pub use resources::{
-    OrbitTrailConfig, SatEntry, SatelliteRenderAssets, SatelliteRenderConfig, SatelliteStore,
-    SelectedSatellite,
+    OrbitTrailConfig, SatEntry, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
 };
 pub use systems::{
     draw_orbit_trails_system, init_satellite_render_assets, move_camera_to_satellite,

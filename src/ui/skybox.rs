@@ -62,16 +62,16 @@ fn asset_loaded(
         cubemap.is_loaded = true;
     }
 
-    if cubemap.activated && cubemap.is_loaded {
-        if let Ok((camera_entity, skybox)) = camera_query.single_mut() {
-            if skybox.is_none() {
-                commands.entity(camera_entity).insert(Skybox {
-                    image: cubemap.image_handle.clone(),
-                    brightness: 500.0,
-                    ..default()
-                });
-            }
-        }
+    if cubemap.activated
+        && cubemap.is_loaded
+        && let Ok((camera_entity, skybox)) = camera_query.single_mut()
+        && skybox.is_none()
+    {
+        commands.entity(camera_entity).insert(Skybox {
+            image: cubemap.image_handle.clone(),
+            brightness: 500.0,
+            ..default()
+        });
     }
 }
 
@@ -86,7 +86,7 @@ fn update_skybox_rotation(
 
     // Calculate GMST rotation
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
-    
+
     // Rotate around Y axis (North).
     // Earth rotates East (CCW from North).
     // Stars appear to rotate West (CW).

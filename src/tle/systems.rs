@@ -100,12 +100,6 @@ pub fn process_fetch_results_system(
                     };
                     store.items.insert(norad, entry);
                 }
-
-                // If we were loading a group, we can reset the loading state after processing results
-                // This is a simple heuristic - in a more complex system you might track group loading more precisely
-                if right_ui.group_loading {
-                    right_ui.group_loading = false;
-                }
             }
             FetchResultMsg::Failure { norad, error } => {
                 eprintln!(
@@ -123,6 +117,18 @@ pub fn process_fetch_results_system(
                         norad
                     );
                 }
+            }
+            FetchResultMsg::GroupDone { group, count } => {
+                println!(
+                    "[TLE DISPATCH] group={} done, {} satellites loaded",
+                    group, count
+                );
+                right_ui.group_loading = false;
+            }
+            FetchResultMsg::GroupFailure { group, error } => {
+                eprintln!("[TLE DISPATCH] group={} failed: {}", group, error);
+                right_ui.group_loading = false;
+                right_ui.error = Some(format!("Group fetch failed: {}", error));
             }
         }
     }

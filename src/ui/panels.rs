@@ -4,9 +4,8 @@ use bevy_egui::egui::{self, Color32};
 use chrono::SecondsFormat;
 use std::collections::hash_map::Entry;
 
-use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::orbital::SimulationTime;
-use crate::satellite::{SatEntry, Satellite, SatelliteColor, SatelliteStore, SelectedSatellite};
+use crate::satellite::{SatEntry, SatelliteStore, SelectedSatellite};
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::{SATELLITE_GROUPS, get_group_display_name};
 use crate::ui::state::{RightPanelUI, UIState};
@@ -50,8 +49,6 @@ pub struct RightPanelContext<'a, 'cw, 'cs, 'fw> {
     pub store: &'a mut SatelliteStore,
     pub right_ui: &'a mut RightPanelUI,
     pub commands: &'a mut Commands<'cw, 'cs>,
-    pub meshes: &'a mut Assets<Mesh>,
-    pub materials: &'a mut Assets<StandardMaterial>,
     pub selected_sat: &'a mut SelectedSatellite,
     pub config_bundle: &'a mut crate::ui::systems::UiConfigBundle,
     pub heatmap_cfg: &'a mut HeatmapConfig,
@@ -66,8 +63,6 @@ pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
         store,
         right_ui,
         commands,
-        meshes,
-        materials,
         selected_sat,
         config_bundle,
         heatmap_cfg,
@@ -171,30 +166,12 @@ pub fn render_right_panel<'a, 'cw, 'cs, 'fw>(
                             let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
                             let color = Color::hsl(hue, sat, light);
 
-                            // spawn entity placeholder
-                            let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
-                            let entity = commands
-                                .spawn((
-                                    Mesh3d(meshes.add(mesh)),
-                                    MeshMaterial3d(materials.add(StandardMaterial {
-                                        // base_color: color,
-                                        emissive: color.to_linear()
-                                            * config_bundle.render_cfg.emissive_intensity,
-                                        ..Default::default()
-                                    })),
-                                    Satellite,
-                                    SatelliteColor(color),
-                                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                                        .with_scale(Vec3::splat(
-                                            config_bundle.render_cfg.sphere_radius,
-                                        )),
-                                ))
-                                .id();
+                            // Insert entry; spawn_missing_satellite_entities_system will create the entity
                             entry.insert(SatEntry {
                                 norad,
                                 name: None,
                                 color,
-                                entity: Some(entity),
+                                entity: None,
                                 tle: None,
                                 propagator: None,
                                 error: None,

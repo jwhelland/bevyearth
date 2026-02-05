@@ -42,6 +42,14 @@ pub enum FetchResultMsg {
         norad: u32,
         error: String,
     },
+    GroupDone {
+        group: String,
+        count: usize,
+    },
+    GroupFailure {
+        group: String,
+        error: String,
+    },
 }
 
 /// Resource containing channels for communicating with the TLE worker thread

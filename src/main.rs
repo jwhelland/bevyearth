@@ -71,11 +71,11 @@ pub fn setup(
     let initial_distance = 25000.0; // ~4x Earth's radius
 
     let pan_orbit = PanOrbitCamera {
-        focus: Vec3::ZERO,  // Look at Earth's center
-        radius: Some(initial_distance),  // Initial distance from focus point
-        yaw: Some(0.0),     // Initial yaw angle
-        pitch: Some(0.0),   // Initial pitch angle
-        force_update: true, // Force immediate positioning
+        focus: Vec3::ZERO,              // Look at Earth's center
+        radius: Some(initial_distance), // Initial distance from focus point
+        yaw: Some(0.0),                 // Initial yaw angle
+        pitch: Some(0.0),               // Initial pitch angle
+        force_update: true,             // Force immediate positioning
         ..default()
     };
 
@@ -119,8 +119,9 @@ pub fn setup(
         Transform::from_xyz(
             initial_sun_direction.x * sun_distance,
             initial_sun_direction.y * sun_distance,
-            initial_sun_direction.z * sun_distance
-        ).looking_at(Vec3::ZERO, Vec3::Y),
+            initial_sun_direction.z * sun_distance,
+        )
+        .looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     commands.insert_resource(Cubemap {
@@ -325,6 +326,59 @@ fn main() {
         theme.set_color("feathers.text.main", palette::LIGHT_GRAY_1);
         theme.set_color("feathers.text.dim", palette::LIGHT_GRAY_2);
         theme.set_color("feathers.focus", palette::ACCENT);
+        theme.set_color("feathers.slider.bg", Color::srgba(0.04, 0.08, 0.12, 0.9));
+        theme.set_color("feathers.slider.bar", Color::srgba(0.18, 0.7, 0.8, 0.7));
+        theme.set_color(
+            "feathers.slider.bar.disabled",
+            Color::srgba(0.1, 0.3, 0.35, 0.45),
+        );
+        theme.set_color("feathers.slider.text", Color::srgba(0.5, 0.9, 0.95, 0.95));
+        theme.set_color(
+            "feathers.slider.text.disabled",
+            Color::srgba(0.4, 0.55, 0.6, 0.7),
+        );
+        theme.set_color("feathers.button.bg", Color::srgba(0.06, 0.12, 0.16, 0.9));
+        theme.set_color(
+            "feathers.button.bg.hover",
+            Color::srgba(0.08, 0.2, 0.26, 0.95),
+        );
+        theme.set_color(
+            "feathers.button.bg.pressed",
+            Color::srgba(0.1, 0.26, 0.32, 0.95),
+        );
+        theme.set_color(
+            "feathers.button.bg.disabled",
+            Color::srgba(0.08, 0.12, 0.15, 0.5),
+        );
+        theme.set_color("feathers.button.txt", Color::srgba(0.6, 1.0, 1.0, 1.0));
+        theme.set_color(
+            "feathers.button.txt.disabled",
+            Color::srgba(0.45, 0.6, 0.65, 0.7),
+        );
+        theme.set_color(
+            "feathers.button.primary.bg",
+            Color::srgba(0.08, 0.22, 0.28, 0.95),
+        );
+        theme.set_color(
+            "feathers.button.primary.bg.hover",
+            Color::srgba(0.1, 0.28, 0.36, 0.98),
+        );
+        theme.set_color(
+            "feathers.button.primary.bg.pressed",
+            Color::srgba(0.12, 0.32, 0.4, 0.98),
+        );
+        theme.set_color(
+            "feathers.button.primary.bg.disabled",
+            Color::srgba(0.08, 0.16, 0.2, 0.6),
+        );
+        theme.set_color(
+            "feathers.button.primary.txt",
+            Color::srgba(0.7, 1.0, 1.0, 1.0),
+        );
+        theme.set_color(
+            "feathers.button.primary.txt.disabled",
+            Color::srgba(0.45, 0.6, 0.65, 0.7),
+        );
         app.insert_resource(theme);
 
         app.add_plugins(FeathersPlugins);

@@ -7,8 +7,8 @@ use bevy::ecs::world::EntityWorldMut;
 use bevy::input::keyboard::KeyCode;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::{ButtonInput, ButtonState};
-use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
 use bevy::picking::Pickable;
+use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
 use bevy::prelude::*;
 use bevy::text::TextColor;
 use bevy::ui::UiSystems;
@@ -23,7 +23,7 @@ use bevy_feathers::font_styles::InheritableFont;
 use bevy_feathers::handle_or_path::HandleOrPath;
 use bevy_feathers::theme::ThemeFontColor;
 use bevy_feathers::theme::ThemedText;
-use bevy_feathers::{constants::fonts, tokens};
+use bevy_feathers::tokens;
 use bevy_input_focus::{FocusedInput, InputFocus, InputFocusVisible, tab_navigation::TabIndex};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 use bevy_ui_widgets::{
@@ -32,8 +32,7 @@ use bevy_ui_widgets::{
 };
 
 use crate::satellite::{
-    NoradId, OrbitTrailConfig, Satellite, SatelliteRenderAssets, SatelliteRenderConfig,
-    SatelliteStore, SelectedSatellite,
+    OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
 };
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
@@ -214,62 +213,100 @@ struct SatelliteToggle {
 #[derive(Component)]
 struct GroupChoice(&'static str);
 
+#[derive(Component)]
+struct SectionToggle {
+    body: Entity,
+}
+
+#[derive(Component)]
+struct UiFontBold;
+
+#[derive(Resource, Clone)]
+struct UiFontHandles {
+    medium: Handle<Font>,
+    bold: Handle<Font>,
+}
+
+const PANEL_BG: Color = Color::srgba(0.03, 0.05, 0.08, 0.78);
+const PANEL_EDGE: Color = Color::srgba(0.1, 0.9, 0.95, 0.35);
+const PANEL_DIVIDER: Color = Color::srgba(0.12, 0.3, 0.35, 0.9);
+const PANEL_INNER_BG: Color = Color::srgba(0.02, 0.04, 0.06, 0.85);
+const PANEL_TEXT_ACCENT: Color = Color::srgba(0.4, 1.0, 1.0, 1.0);
+const UI_FONT_PATH: &str = "Orbitron-Medium.ttf";
+const UI_FONT_BOLD_PATH: &str = "Orbitron-Bold.ttf";
+const TOP_PANEL_HEIGHT_PX: f32 = 52.0;
+const BOTTOM_PANEL_HEIGHT_PX: f32 = 32.0;
+const GRID_LINE: Color = Color::srgba(0.1, 0.6, 0.7, 0.10);
+const GRID_STEPS: [f32; 9] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0];
+
+#[derive(Clone, Copy)]
+enum Edge {
+    Top,
+    Left,
+    Right,
+}
+
 /// Plugin that registers UI systems and observers
 pub struct UiSystemsPlugin;
 
 impl Plugin for UiSystemsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (setup_ui_camera, setup_ui))
-            .add_systems(
-                Update,
-                (
-                    toggle_panels_keyboard,
-                    apply_panel_visibility,
-                    apply_panel_layout,
-                    scroll_right_panel_on_wheel,
-                    update_time_display,
-                    update_status_texts,
-                    update_text_input_display,
-                ),
+        app.add_systems(
+            Startup,
+            (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                toggle_panels_keyboard,
+                apply_panel_visibility,
+                apply_panel_layout,
+                scroll_right_panel_on_wheel,
+                update_time_display,
+                update_status_texts,
+                update_text_input_display,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                process_pending_add,
+                sync_widget_states,
+                sync_slider_visuals,
+                handle_group_loading_text,
+                navigate_focus_with_arrows,
+                // IMPORTANT: this despawns/spawns UI entities; it must run after any system
+                // that might queue commands targeting the current list rows.
+                update_satellite_list,
+                enforce_orbitron_text,
             )
-            .add_systems(
-                Update,
-                (
-                    process_pending_add,
-                    sync_widget_states,
-                    sync_slider_visuals,
-                    handle_group_loading_text,
-                    navigate_focus_with_arrows,
-                    // IMPORTANT: this despawns/spawns UI entities; it must run after any system
-                    // that might queue commands targeting the current list rows.
-                    update_satellite_list,
-                )
-                    .chain(),
-            )
-            // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
-            // and late enough that no later system overwrites our settings before extraction.
-            .add_systems(
-                PostUpdate,
-                (enforce_ui_camera_settings, update_camera_viewport_from_ui)
-                    .chain()
-                    .after(UiSystems::Layout),
-            )
-            .add_systems(
-                PostUpdate,
-                update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
-            )
-            .add_observer(checkbox_self_update)
-            .add_observer(slider_self_update)
-            .add_observer(handle_button_activate)
-            .add_observer(handle_checkbox_change)
-            .add_observer(handle_slider_change)
-            .add_observer(handle_range_mode_change)
-            .add_observer(text_input_on_click)
-            .add_observer(text_input_on_key_input)
-            .add_observer(handle_group_choice)
-            .add_observer(handle_right_panel_resize_start)
-            .add_observer(handle_right_panel_resize_drag)
-            .add_observer(handle_right_panel_resize_end);
+                .chain(),
+        )
+        // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
+        // and late enough that no later system overwrites our settings before extraction.
+        .add_systems(
+            PostUpdate,
+            (enforce_ui_camera_settings, update_camera_viewport_from_ui)
+                .chain()
+                .after(UiSystems::Layout),
+        )
+        .add_systems(
+            PostUpdate,
+            update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
+        )
+        .add_observer(checkbox_self_update)
+        .add_observer(slider_self_update)
+        .add_observer(handle_button_activate)
+        .add_observer(handle_section_toggle)
+        .add_observer(handle_checkbox_change)
+        .add_observer(handle_slider_change)
+        .add_observer(handle_range_mode_change)
+        .add_observer(text_input_on_click)
+        .add_observer(text_input_on_key_input)
+        .add_observer(handle_group_choice)
+        .add_observer(handle_right_panel_resize_start)
+        .add_observer(handle_right_panel_resize_drag)
+        .add_observer(handle_right_panel_resize_end);
     }
 }
 
@@ -313,6 +350,35 @@ fn setup_ui_camera(mut commands: Commands) {
     ));
 }
 
+fn apply_orbitron_font(mut fonts: Query<&mut InheritableFont>) {
+    for mut font in &mut fonts {
+        font.font = HandleOrPath::Path(UI_FONT_PATH.to_owned());
+    }
+}
+
+fn load_ui_font(mut commands: Commands, assets: Res<AssetServer>) {
+    commands.insert_resource(UiFontHandles {
+        medium: assets.load(UI_FONT_PATH),
+        bold: assets.load(UI_FONT_BOLD_PATH),
+    });
+}
+
+fn enforce_orbitron_text(
+    ui_font: Res<UiFontHandles>,
+    mut q_text: Query<(&mut TextFont, Option<&UiFontBold>), With<ThemedText>>,
+) {
+    for (mut font, is_bold) in &mut q_text {
+        let target = if is_bold.is_some() {
+            &ui_font.bold
+        } else {
+            &ui_font.medium
+        };
+        if font.font != *target {
+            font.font = target.clone();
+        }
+    }
+}
+
 fn setup_ui(
     mut commands: Commands,
     layout: Res<UiLayoutState>,
@@ -333,7 +399,7 @@ fn setup_ui(
             Pickable::IGNORE,
             // Provide a default font + text color for all `ThemedText` descendants.
             InheritableFont {
-                font: HandleOrPath::Path(fonts::REGULAR.to_owned()),
+                font: HandleOrPath::Path(UI_FONT_PATH.to_owned()),
                 font_size: 12.0,
             },
             ThemeFontColor(tokens::TEXT_MAIN),
@@ -356,9 +422,9 @@ fn setup_ui(
                 row_gap: Val::Px(8.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.07, 0.1, 0.92)),
+            BackgroundColor(PANEL_BG),
             InheritableFont {
-                font: HandleOrPath::Path(fonts::REGULAR.to_owned()),
+                font: HandleOrPath::Path(UI_FONT_PATH.to_owned()),
                 font_size: 12.0,
             },
             ThemeFontColor(tokens::TEXT_MAIN),
@@ -382,9 +448,9 @@ fn setup_ui(
                 row_gap: Val::Px(8.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.07, 0.1, 0.92)),
+            BackgroundColor(PANEL_BG),
             InheritableFont {
-                font: HandleOrPath::Path(fonts::REGULAR.to_owned()),
+                font: HandleOrPath::Path(UI_FONT_PATH.to_owned()),
                 font_size: 12.0,
             },
             ThemeFontColor(tokens::TEXT_MAIN),
@@ -402,16 +468,16 @@ fn setup_ui(
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
-                height: Val::Px(52.0),
+                height: Val::Px(TOP_PANEL_HEIGHT_PX),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(12.0),
                 justify_content: JustifyContent::SpaceBetween,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.04, 0.06, 0.95)),
+            BackgroundColor(PANEL_BG),
             InheritableFont {
-                font: HandleOrPath::Path(fonts::REGULAR.to_owned()),
+                font: HandleOrPath::Path(UI_FONT_PATH.to_owned()),
                 font_size: 12.0,
             },
             ThemeFontColor(tokens::TEXT_MAIN),
@@ -429,15 +495,15 @@ fn setup_ui(
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                height: Val::Px(32.0),
+                height: Val::Px(BOTTOM_PANEL_HEIGHT_PX),
                 padding: UiRect::horizontal(Val::Px(12.0)),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(12.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.04, 0.06, 0.95)),
+            BackgroundColor(PANEL_BG),
             InheritableFont {
-                font: HandleOrPath::Path(fonts::REGULAR.to_owned()),
+                font: HandleOrPath::Path(UI_FONT_PATH.to_owned()),
                 font_size: 11.0,
             },
             ThemeFontColor(tokens::TEXT_DIM),
@@ -452,6 +518,23 @@ fn setup_ui(
     commands.entity(root).add_child(right_panel);
     commands.entity(root).add_child(top_panel);
     commands.entity(root).add_child(bottom_panel);
+
+    commands.entity(left_panel).with_children(|panel| {
+        spawn_edge_glow(panel, Edge::Right);
+        spawn_grid_overlay(panel);
+    });
+    commands.entity(right_panel).with_children(|panel| {
+        spawn_edge_glow(panel, Edge::Left);
+        spawn_grid_overlay(panel);
+    });
+    commands.entity(top_panel).with_children(|panel| {
+        spawn_edge_glow(panel, Edge::Top);
+        spawn_grid_overlay(panel);
+    });
+    commands.entity(bottom_panel).with_children(|panel| {
+        spawn_edge_glow(panel, Edge::Top);
+        spawn_grid_overlay(panel);
+    });
 
     // Left panel contents
     commands.entity(left_panel).with_children(|parent| {
@@ -568,480 +651,494 @@ fn setup_ui(
                         RightPanelScroll,
                     ))
                     .with_children(|parent| {
-                        parent.spawn((bevy::ui::widget::Text::new("Satellites"), ThemedText));
-
-                        parent.spawn((bevy::ui::widget::Text::new("Satellite Groups"), ThemedText));
-
-                        parent
-                            .spawn((
-                                Node {
-                                    flex_direction: FlexDirection::Row,
-                                    column_gap: Val::Px(8.0),
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                                ThemedText,
-                            ))
-                            .with_children(|container| {
-                                let group_list_entity = container
-                                    .spawn((
-                                        Node {
-                                            flex_direction: FlexDirection::Column,
-                                            row_gap: Val::Px(4.0),
-                                            width: Val::Px(320.0),
-                                            height: Val::Px(180.0),
-                                            overflow: Overflow::scroll_y(),
-                                            padding: UiRect::all(Val::Px(4.0)),
-                                            ..default()
-                                        },
-                                        ScrollPosition::default(),
-                                        ThemedText,
-                                        GroupList,
-                                    ))
-                                    .with_children(|groups| {
-                                        for (group_key, group_name) in SATELLITE_GROUPS {
-                                            groups.spawn((radio(
-                                                (
-                                                    GroupChoice(*group_key),
-                                                    AutoDirectionalNavigation::default(),
-                                                ),
-                                                Spawn((
-                                                    bevy::ui::widget::Text::new(*group_name),
-                                                    ThemedText,
-                                                )),
-                                            ),));
-                                        }
-                                    })
-                                    .id();
-
-                                spawn_scrollbar(container, group_list_entity, 180.0);
-                            });
-
-                        parent.spawn((button(
-                            ButtonProps {
-                                variant: ButtonVariant::Primary,
+                        parent.spawn((
+                            bevy::ui::widget::Text::new("Satellites"),
+                            ThemedText,
+                            TextFont {
+                                font_size: 15.0,
                                 ..default()
                             },
-                            (
-                                ButtonAction::LoadGroup,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Load Group"), ThemedText)),
-                        ),));
-
-                        parent.spawn((
-                            GroupLoadingText,
-                            bevy::ui::widget::Text::new(""),
-                            ThemedText,
+                            TextColor(PANEL_TEXT_ACCENT),
+                            UiFontBold,
                         ));
-
-                        parent.spawn((bevy::ui::widget::Text::new("Add Satellite"), ThemedText));
-
-                        parent
-                            .spawn((
-                                Node {
-                                    flex_direction: FlexDirection::Row,
-                                    column_gap: Val::Px(8.0),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                                ThemedText,
-                            ))
-                            .with_children(|row| {
-                                row.spawn((
+                        spawn_section(parent, "Satellite Groups", true, |section| {
+                            section
+                                .spawn((
                                     Node {
-                                        width: Val::Px(180.0),
-                                        height: Val::Px(28.0),
-                                        padding: UiRect::horizontal(Val::Px(6.0)),
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.08, 0.1, 0.14, 1.0)),
-                                    ThemedText,
-                                    AutoDirectionalNavigation::default(),
-                                    TabIndex(0),
-                                    TextInputField,
-                                ))
-                                .with_children(|field| {
-                                    field.spawn((
-                                        TextInputValueText,
-                                        bevy::ui::widget::Text::new(""),
-                                        ThemedText,
-                                    ));
-                                    field.spawn((
-                                        TextInputPlaceholderText,
-                                        bevy::ui::widget::Text::new("NORAD ID"),
-                                        ThemedText,
-                                    ));
-                                });
-
-                                row.spawn((button(
-                                    ButtonProps::default(),
-                                    (
-                                        ButtonAction::AddSatellite,
-                                        AutoDirectionalNavigation::default(),
-                                    ),
-                                    Spawn((bevy::ui::widget::Text::new("Add"), ThemedText)),
-                                ),));
-                            });
-
-                        parent.spawn((
-                            ErrorText,
-                            bevy::ui::widget::Text::new(""),
-                            ThemedText,
-                            TextColor(Color::srgb(1.0, 0.2, 0.2)),
-                        ));
-
-                        parent.spawn((button(
-                            ButtonProps::default(),
-                            (ButtonAction::ClearAll, AutoDirectionalNavigation::default()),
-                            Spawn((
-                                bevy::ui::widget::Text::new("Clear All Satellites"),
-                                ThemedText,
-                            )),
-                        ),));
-
-                        parent.spawn((
-                            bevy::ui::widget::Text::new("Ground Track Settings"),
-                            ThemedText,
-                        ));
-
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::TracksAll,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("All Tracks"), ThemedText)),
-                        ),));
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::GroundTracksEnabled,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((
-                                bevy::ui::widget::Text::new("Show ground tracks"),
-                                ThemedText,
-                            )),
-                        ),));
-                spawn_labeled_slider(
-                    parent,
-                    "Track radius (km)",
-                    SliderBinding::GroundTrackRadius,
-                    10.0,
-                    500.0,
-                    config_bundle.ground_track_cfg.radius_km,
-                    5.0,
-                );
-
-                        parent.spawn((bevy::ui::widget::Text::new("Gizmo Settings"), ThemedText));
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::GizmoEnabled,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Use gizmo circles"), ThemedText)),
-                        ),));
-                spawn_labeled_slider(
-                    parent,
-                    "Circle segments",
-                    SliderBinding::GizmoSegments,
-                    16.0,
-                    128.0,
-                    config_bundle.gizmo_cfg.circle_segments as f32,
-                    1.0,
-                );
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::GizmoShowCenterDot,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Show center dot"), ThemedText)),
-                        ),));
-                spawn_labeled_slider(
-                    parent,
-                    "Center dot size (km)",
-                    SliderBinding::GizmoCenterDotSize,
-                    50.0,
-                    500.0,
-                    config_bundle.gizmo_cfg.center_dot_size,
-                    10.0,
-                );
-
-                        parent.spawn((
-                            bevy::ui::widget::Text::new("Orbit Trail Settings"),
-                            ThemedText,
-                        ));
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::TrailsAll,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("All Trails"), ThemedText)),
-                        ),));
-                spawn_labeled_slider(
-                    parent,
-                    "Max history points",
-                    SliderBinding::TrailMaxPoints,
-                    100.0,
-                    10000.0,
-                    config_bundle.trail_cfg.max_points as f32,
-                    50.0,
-                );
-                spawn_labeled_slider(
-                    parent,
-                    "Update interval (s)",
-                    SliderBinding::TrailUpdateInterval,
-                    0.5,
-                    10.0,
-                    config_bundle.trail_cfg.update_interval_seconds,
-                    0.1,
-                );
-
-                        parent.spawn((bevy::ui::widget::Text::new("Heatmap Settings"), ThemedText));
-                        parent.spawn((checkbox(
-                            (
-                                CheckboxBinding::HeatmapEnabled,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Enable heatmap"), ThemedText)),
-                        ),));
-                        spawn_labeled_slider(
-                            parent,
-                            "Update period (s)",
-                            SliderBinding::HeatmapUpdatePeriod,
-                            0.1,
-                            2.0,
-                            heatmap_cfg.update_period_s,
-                            0.1,
-                        );
-                        spawn_labeled_slider(
-                            parent,
-                            "Opacity",
-                            SliderBinding::HeatmapOpacity,
-                            0.0,
-                            1.0,
-                            heatmap_cfg.color_alpha,
-                            0.05,
-                        );
-
-                        parent.spawn((bevy::ui::widget::Text::new("Range mode"), ThemedText));
-                        parent.spawn((radio(
-                            (RangeModeBinding::Auto, AutoDirectionalNavigation::default()),
-                            Spawn((bevy::ui::widget::Text::new("Auto"), ThemedText)),
-                        ),));
-                        parent.spawn((radio(
-                            (
-                                RangeModeBinding::Fixed,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Fixed"), ThemedText)),
-                        ),));
-
-                        spawn_labeled_slider(
-                            parent,
-                            "Fixed max",
-                            SliderBinding::HeatmapFixedMax,
-                            1.0,
-                            100.0,
-                            heatmap_cfg.fixed_max.unwrap_or(20) as f32,
-                            1.0,
-                        );
-
-                        spawn_labeled_slider(
-                            parent,
-                            "Chunk size",
-                            SliderBinding::HeatmapChunkSize,
-                            500.0,
-                            5000.0,
-                            heatmap_cfg.chunk_size as f32,
-                            100.0,
-                        );
-                        spawn_labeled_slider(
-                            parent,
-                            "Chunks/frame",
-                            SliderBinding::HeatmapChunksPerFrame,
-                            1.0,
-                            5.0,
-                            heatmap_cfg.chunks_per_frame as f32,
-                            1.0,
-                        );
-
-                        parent.spawn((
-                            bevy::ui::widget::Text::new("Satellite Rendering"),
-                            ThemedText,
-                        ));
-                        spawn_labeled_slider(
-                            parent,
-                            "Sphere size (km)",
-                            SliderBinding::SatelliteSphereRadius,
-                            1.0,
-                            200.0,
-                            config_bundle.render_cfg.sphere_radius,
-                            1.0,
-                        );
-                        spawn_labeled_slider(
-                            parent,
-                            "Emissive intensity",
-                            SliderBinding::SatelliteEmissiveIntensity,
-                            10.0,
-                            500.0,
-                            config_bundle.render_cfg.emissive_intensity,
-                            5.0,
-                        );
-
-                // Atmosphere controls removed for now (feature disabled).
-
-                        parent.spawn((bevy::ui::widget::Text::new("Camera Tracking"), ThemedText));
-                        parent.spawn((
-                            TrackingStatusText,
-                            bevy::ui::widget::Text::new("Tracking: None"),
-                            ThemedText,
-                        ));
-                        parent.spawn((button(
-                            ButtonProps::default(),
-                            (
-                                ButtonAction::StopTracking,
-                                AutoDirectionalNavigation::default(),
-                            ),
-                            Spawn((bevy::ui::widget::Text::new("Stop Tracking"), ThemedText)),
-                        ),));
-                        spawn_labeled_slider(
-                            parent,
-                            "Tracking distance (km)",
-                            SliderBinding::TrackingDistance,
-                            1000.0,
-                            20000.0,
-                            selected.tracking_offset,
-                            100.0,
-                        );
-                        spawn_labeled_slider(
-                            parent,
-                            "Tracking smoothness",
-                            SliderBinding::TrackingSmoothness,
-                            0.01,
-                            1.0,
-                            selected.smooth_factor,
-                            0.01,
-                        );
-
-                        parent.spawn((bevy::ui::widget::Text::new("Satellites List"), ThemedText));
-
-                        // Header Row
-                        parent
-                            .spawn((
-                                Node {
-                                    flex_direction: FlexDirection::Row,
-                                    align_items: AlignItems::Center,
-                                    column_gap: Val::Px(6.0),
-                                    padding: UiRect::horizontal(Val::Px(4.0)),
-                                    width: Val::Px(380.0),
-                                    ..default()
-                                },
-                                ThemedText,
-                            ))
-                            .with_children(|header| {
-                                header.spawn((
-                                    bevy::ui::widget::Text::new("NORAD"),
-                                    ThemedText,
-                                    Node {
-                                        width: Val::Px(90.0),
-                                        ..default()
-                                    },
-                                    TextFont {
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                ));
-                                header.spawn((
-                                    bevy::ui::widget::Text::new("Name"),
-                                    ThemedText,
-                                    Node {
-                                        flex_grow: 1.0,
+                                        flex_direction: FlexDirection::Row,
+                                        column_gap: Val::Px(8.0),
+                                        width: Val::Percent(100.0),
                                         min_width: Val::Px(0.0),
                                         ..default()
                                     },
-                                    TextFont {
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                ));
-                                header.spawn((
-                                    bevy::ui::widget::Text::new("Status"),
+                                    Pickable::IGNORE,
                                     ThemedText,
-                                    Node {
-                                        width: Val::Px(60.0),
-                                        ..default()
-                                    },
-                                    TextFont {
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                ));
-                                header.spawn((
-                                    bevy::ui::widget::Text::new("G.T."),
-                                    ThemedText,
-                                    Node {
-                                        width: Val::Px(24.0),
-                                        justify_content: JustifyContent::Center,
-                                        ..default()
-                                    },
-                                    TextFont {
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                ));
-                                header.spawn((
-                                    bevy::ui::widget::Text::new("Trail"),
-                                    ThemedText,
-                                    Node {
-                                        width: Val::Px(24.0),
-                                        justify_content: JustifyContent::Center,
-                                        ..default()
-                                    },
-                                    TextFont {
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                ));
-                                // Spacer for X button
-                                header.spawn(Node {
-                                    width: Val::Px(28.0),
-                                    ..default()
-                                });
-                            });
+                                ))
+                                .with_children(|container| {
+                                    let group_list_entity = container
+                                        .spawn((
+                                            Node {
+                                                flex_direction: FlexDirection::Column,
+                                                row_gap: Val::Px(4.0),
+                                                width: Val::Percent(100.0),
+                                                min_width: Val::Px(0.0),
+                                                height: Val::Px(180.0),
+                                                overflow: Overflow::scroll_y(),
+                                                padding: UiRect::all(Val::Px(4.0)),
+                                                ..default()
+                                            },
+                                            ScrollPosition::default(),
+                                            ThemedText,
+                                            GroupList,
+                                        ))
+                                        .with_children(|groups| {
+                                            for (group_key, group_name) in SATELLITE_GROUPS {
+                                                groups.spawn((radio(
+                                                    (
+                                                        GroupChoice(group_key),
+                                                        AutoDirectionalNavigation::default(),
+                                                    ),
+                                                    Spawn((
+                                                        bevy::ui::widget::Text::new(*group_name),
+                                                        ThemedText,
+                                                    )),
+                                                ),));
+                                            }
+                                        })
+                                        .id();
 
-                        parent
-                            .spawn((
-                                Node {
-                                    flex_direction: FlexDirection::Row,
-                                    column_gap: Val::Px(6.0),
-                                    height: Val::Px(240.0),
+                                    spawn_scrollbar(container, group_list_entity, 180.0);
+                                });
+
+                            section.spawn((button(
+                                ButtonProps {
+                                    variant: ButtonVariant::Primary,
                                     ..default()
                                 },
+                                (
+                                    ButtonAction::LoadGroup,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("Load Group"), ThemedText)),
+                            ),));
+
+                            section.spawn((button(
+                                ButtonProps::default(),
+                                (ButtonAction::ClearAll, AutoDirectionalNavigation::default()),
+                                Spawn((
+                                    bevy::ui::widget::Text::new("Clear All Satellites"),
+                                    ThemedText,
+                                )),
+                            ),));
+
+                            section.spawn((
+                                GroupLoadingText,
+                                bevy::ui::widget::Text::new(""),
                                 ThemedText,
-                            ))
-                            .with_children(|container| {
-                                let list_entity = container
-                                    .spawn((
+                            ));
+                        });
+
+                        spawn_section(parent, "Add Satellite", false, |section| {
+                            section
+                                .spawn((
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        column_gap: Val::Px(8.0),
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                    ThemedText,
+                                ))
+                                .with_children(|row| {
+                                    row.spawn((
                                         Node {
-                                            flex_direction: FlexDirection::Column,
-                                            row_gap: Val::Px(2.0),
-                                            width: Val::Px(380.0),
-                                            height: Val::Px(240.0),
-                                            overflow: Overflow::scroll_y(),
-                                            padding: UiRect::all(Val::Px(4.0)),
+                                            width: Val::Px(180.0),
+                                            height: Val::Px(28.0),
+                                            padding: UiRect::horizontal(Val::Px(6.0)),
+                                            align_items: AlignItems::Center,
                                             ..default()
                                         },
-                                        ScrollPosition::default(),
+                                        BackgroundColor(Color::srgba(0.08, 0.1, 0.14, 1.0)),
                                         ThemedText,
-                                        SatelliteList,
+                                        AutoDirectionalNavigation::default(),
+                                        TabIndex(0),
+                                        TextInputField,
                                     ))
-                                    .id();
+                                    .with_children(|field| {
+                                        field.spawn((
+                                            TextInputValueText,
+                                            bevy::ui::widget::Text::new(""),
+                                            ThemedText,
+                                        ));
+                                        field.spawn((
+                                            TextInputPlaceholderText,
+                                            bevy::ui::widget::Text::new("NORAD ID"),
+                                            ThemedText,
+                                        ));
+                                    });
 
-                                spawn_scrollbar(container, list_entity, 240.0);
-                                satellite_list = list_entity;
-                            });
+                                    row.spawn((button(
+                                        ButtonProps::default(),
+                                        (
+                                            ButtonAction::AddSatellite,
+                                            AutoDirectionalNavigation::default(),
+                                        ),
+                                        Spawn((bevy::ui::widget::Text::new("Add"), ThemedText)),
+                                    ),));
+                                });
+
+                            section.spawn((
+                                ErrorText,
+                                bevy::ui::widget::Text::new(""),
+                                ThemedText,
+                                TextColor(Color::srgb(1.0, 0.2, 0.2)),
+                            ));
+                        });
+
+                        spawn_section(parent, "Ground Tracks", false, |section| {
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::TracksAll,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("All Tracks"), ThemedText)),
+                            ),));
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::GroundTracksEnabled,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((
+                                    bevy::ui::widget::Text::new("Show ground tracks"),
+                                    ThemedText,
+                                )),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Track radius (km)",
+                                SliderBinding::GroundTrackRadius,
+                                10.0,
+                                500.0,
+                                config_bundle.ground_track_cfg.radius_km,
+                                5.0,
+                            );
+
+                            section
+                                .spawn((bevy::ui::widget::Text::new("Gizmo Settings"), ThemedText));
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::GizmoEnabled,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((
+                                    bevy::ui::widget::Text::new("Use gizmo circles"),
+                                    ThemedText,
+                                )),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Circle segments",
+                                SliderBinding::GizmoSegments,
+                                16.0,
+                                128.0,
+                                config_bundle.gizmo_cfg.circle_segments as f32,
+                                1.0,
+                            );
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::GizmoShowCenterDot,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("Show center dot"), ThemedText)),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Center dot size (km)",
+                                SliderBinding::GizmoCenterDotSize,
+                                50.0,
+                                500.0,
+                                config_bundle.gizmo_cfg.center_dot_size,
+                                10.0,
+                            );
+                        });
+
+                        spawn_section(parent, "Orbit Trails", false, |section| {
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::TrailsAll,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("All Trails"), ThemedText)),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Max history points",
+                                SliderBinding::TrailMaxPoints,
+                                100.0,
+                                10000.0,
+                                config_bundle.trail_cfg.max_points as f32,
+                                50.0,
+                            );
+                            spawn_labeled_slider(
+                                section,
+                                "Update interval (s)",
+                                SliderBinding::TrailUpdateInterval,
+                                0.5,
+                                10.0,
+                                config_bundle.trail_cfg.update_interval_seconds,
+                                0.1,
+                            );
+                        });
+
+                        spawn_section(parent, "Heatmap", false, |section| {
+                            section.spawn((checkbox(
+                                (
+                                    CheckboxBinding::HeatmapEnabled,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("Enable heatmap"), ThemedText)),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Update period (s)",
+                                SliderBinding::HeatmapUpdatePeriod,
+                                0.1,
+                                2.0,
+                                heatmap_cfg.update_period_s,
+                                0.1,
+                            );
+                            spawn_labeled_slider(
+                                section,
+                                "Opacity",
+                                SliderBinding::HeatmapOpacity,
+                                0.0,
+                                1.0,
+                                heatmap_cfg.color_alpha,
+                                0.05,
+                            );
+
+                            section.spawn((bevy::ui::widget::Text::new("Range mode"), ThemedText));
+                            section.spawn((radio(
+                                (RangeModeBinding::Auto, AutoDirectionalNavigation::default()),
+                                Spawn((bevy::ui::widget::Text::new("Auto"), ThemedText)),
+                            ),));
+                            section.spawn((radio(
+                                (
+                                    RangeModeBinding::Fixed,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("Fixed"), ThemedText)),
+                            ),));
+
+                            spawn_labeled_slider(
+                                section,
+                                "Fixed max",
+                                SliderBinding::HeatmapFixedMax,
+                                1.0,
+                                100.0,
+                                heatmap_cfg.fixed_max.unwrap_or(20) as f32,
+                                1.0,
+                            );
+
+                            spawn_labeled_slider(
+                                section,
+                                "Chunk size",
+                                SliderBinding::HeatmapChunkSize,
+                                500.0,
+                                5000.0,
+                                heatmap_cfg.chunk_size as f32,
+                                100.0,
+                            );
+                            spawn_labeled_slider(
+                                section,
+                                "Chunks/frame",
+                                SliderBinding::HeatmapChunksPerFrame,
+                                1.0,
+                                5.0,
+                                heatmap_cfg.chunks_per_frame as f32,
+                                1.0,
+                            );
+                        });
+
+                        spawn_section(parent, "Satellite Rendering", false, |section| {
+                            spawn_labeled_slider(
+                                section,
+                                "Sphere size (km)",
+                                SliderBinding::SatelliteSphereRadius,
+                                1.0,
+                                200.0,
+                                config_bundle.render_cfg.sphere_radius,
+                                1.0,
+                            );
+                            spawn_labeled_slider(
+                                section,
+                                "Emissive intensity",
+                                SliderBinding::SatelliteEmissiveIntensity,
+                                10.0,
+                                500.0,
+                                config_bundle.render_cfg.emissive_intensity,
+                                5.0,
+                            );
+                        });
+
+                        // Atmosphere controls removed for now (feature disabled).
+
+                        spawn_section(parent, "Camera Tracking", false, |section| {
+                            section.spawn((
+                                TrackingStatusText,
+                                bevy::ui::widget::Text::new("Tracking: None"),
+                                ThemedText,
+                            ));
+                            section.spawn((button(
+                                ButtonProps::default(),
+                                (
+                                    ButtonAction::StopTracking,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((bevy::ui::widget::Text::new("Stop Tracking"), ThemedText)),
+                            ),));
+                            spawn_labeled_slider(
+                                section,
+                                "Tracking distance (km)",
+                                SliderBinding::TrackingDistance,
+                                1000.0,
+                                20000.0,
+                                selected.tracking_offset,
+                                100.0,
+                            );
+                            spawn_labeled_slider(
+                                section,
+                                "Tracking smoothness",
+                                SliderBinding::TrackingSmoothness,
+                                0.01,
+                                1.0,
+                                selected.smooth_factor,
+                                0.01,
+                            );
+                        });
+
+                        spawn_section(parent, "Satellites List", false, |section| {
+                            // Header Row
+                            section
+                                .spawn((
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(6.0),
+                                        padding: UiRect::horizontal(Val::Px(4.0)),
+                                        width: Val::Percent(100.0),
+                                        min_width: Val::Px(0.0),
+                                        ..default()
+                                    },
+                                    ThemedText,
+                                ))
+                                .with_children(|header| {
+                                    header.spawn((
+                                        bevy::ui::widget::Text::new("NORAD"),
+                                        ThemedText,
+                                        Node {
+                                            width: Val::Px(90.0),
+                                            ..default()
+                                        },
+                                        TextFont {
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                    ));
+                                    header.spawn((
+                                        bevy::ui::widget::Text::new("Name"),
+                                        ThemedText,
+                                        Node {
+                                            flex_grow: 1.0,
+                                            min_width: Val::Px(0.0),
+                                            ..default()
+                                        },
+                                        TextFont {
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                    ));
+                                    header.spawn((
+                                        bevy::ui::widget::Text::new("Status"),
+                                        ThemedText,
+                                        Node {
+                                            width: Val::Px(60.0),
+                                            ..default()
+                                        },
+                                        TextFont {
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                    ));
+                                    header.spawn((
+                                        bevy::ui::widget::Text::new("G.T."),
+                                        ThemedText,
+                                        Node {
+                                            width: Val::Px(24.0),
+                                            justify_content: JustifyContent::Center,
+                                            ..default()
+                                        },
+                                        TextFont {
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                    ));
+                                    header.spawn((
+                                        bevy::ui::widget::Text::new("Trail"),
+                                        ThemedText,
+                                        Node {
+                                            width: Val::Px(24.0),
+                                            justify_content: JustifyContent::Center,
+                                            ..default()
+                                        },
+                                        TextFont {
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                    ));
+                                    // Spacer for X button
+                                    header.spawn(Node {
+                                        width: Val::Px(28.0),
+                                        ..default()
+                                    });
+                                });
+
+                            section
+                                .spawn((
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        column_gap: Val::Px(6.0),
+                                        height: Val::Px(240.0),
+                                        width: Val::Percent(100.0),
+                                        min_width: Val::Px(0.0),
+                                        ..default()
+                                    },
+                                    ThemedText,
+                                ))
+                                .with_children(|container| {
+                                    let list_entity = container
+                                        .spawn((
+                                            Node {
+                                                flex_direction: FlexDirection::Column,
+                                                row_gap: Val::Px(2.0),
+                                                width: Val::Percent(100.0),
+                                                min_width: Val::Px(0.0),
+                                                height: Val::Px(240.0),
+                                                overflow: Overflow::scroll_y(),
+                                                padding: UiRect::all(Val::Px(4.0)),
+                                                ..default()
+                                            },
+                                            ScrollPosition::default(),
+                                            ThemedText,
+                                            SatelliteList,
+                                        ))
+                                        .id();
+
+                                    spawn_scrollbar(container, list_entity, 240.0);
+                                    satellite_list = list_entity;
+                                });
+                        });
                     })
                     .id();
 
@@ -1051,51 +1148,42 @@ fn setup_ui(
 
     // Top panel contents
     commands.entity(top_panel).with_children(|parent| {
-                    parent
-                        .spawn((
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(8.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                            ThemedText,
-                        ))
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
             .with_children(|left| {
                 left.spawn((
                     TimeText,
                     bevy::ui::widget::Text::new("UTC: --"),
                     ThemedText,
                     TextFont {
-                        font_size: 12.0,
-                        ..default()
-                    },
-                ));
-                left.spawn((
-                    TimeScaleText,
-                    bevy::ui::widget::Text::new("1.0x"),
-                    ThemedText,
-                    TextFont {
-                        font_size: 12.0,
+                        font_size: 13.0,
                         ..default()
                     },
                 ));
             });
 
-                    parent
-                        .spawn((
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(8.0),
-                                flex_grow: 1.0,
-                                min_width: Val::Px(220.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                            ThemedText,
-                        ))
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    width: Val::Px(240.0),
+                    flex_grow: 0.0,
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
             .with_children(|middle| {
                 spawn_labeled_slider(
                     middle,
@@ -1106,21 +1194,7 @@ fn setup_ui(
                     sim_time.time_scale,
                     1.0,
                 );
-            });
-
-                    parent
-                        .spawn((
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(8.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                            ThemedText,
-                        ))
-            .with_children(|right| {
-                right
+                middle
                     .spawn(button(
                         ButtonProps::default(),
                         (
@@ -1137,12 +1211,12 @@ fn setup_ui(
                         )),
                     ))
                     .insert(Node {
-                        width: Val::Px(72.0),
+                        width: Val::Px(56.0),
                         flex_grow: 0.0,
                         ..default()
                     });
 
-                right
+                middle
                     .spawn(button(
                         ButtonProps::default(),
                         (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
@@ -1156,11 +1230,24 @@ fn setup_ui(
                         )),
                     ))
                     .insert(Node {
-                        width: Val::Px(84.0),
+                        width: Val::Px(64.0),
                         flex_grow: 0.0,
                         ..default()
                     });
+            });
 
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
+            .with_children(|right| {
                 right.spawn((
                     bevy::ui::widget::Text::new("Panels:"),
                     ThemedText,
@@ -1176,7 +1263,7 @@ fn setup_ui(
                         AutoDirectionalNavigation::default(),
                     ),
                     Spawn((
-                        bevy::ui::widget::Text::new("Left"),
+                        bevy::ui::widget::Text::new("Vis"),
                         ThemedText,
                         TextFont {
                             font_size: 11.0,
@@ -1191,7 +1278,7 @@ fn setup_ui(
                         AutoDirectionalNavigation::default(),
                     ),
                     Spawn((
-                        bevy::ui::widget::Text::new("Right"),
+                        bevy::ui::widget::Text::new("Sat"),
                         ThemedText,
                         TextFont {
                             font_size: 11.0,
@@ -1206,7 +1293,7 @@ fn setup_ui(
                         AutoDirectionalNavigation::default(),
                     ),
                     Spawn((
-                        bevy::ui::widget::Text::new("Top"),
+                        bevy::ui::widget::Text::new("Time"),
                         ThemedText,
                         TextFont {
                             font_size: 11.0,
@@ -1221,7 +1308,7 @@ fn setup_ui(
                         AutoDirectionalNavigation::default(),
                     ),
                     Spawn((
-                        bevy::ui::widget::Text::new("Bottom"),
+                        bevy::ui::widget::Text::new("Status"),
                         ThemedText,
                         TextFont {
                             font_size: 11.0,
@@ -1301,6 +1388,196 @@ fn spawn_labeled_slider(
                 ),
             ),));
         });
+}
+
+fn spawn_section(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    initially_expanded: bool,
+    build: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                width: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(PANEL_INNER_BG),
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|section| {
+            spawn_corner_brackets(section);
+            let header_entity = section
+                .spawn(button(
+                    ButtonProps::default(),
+                    AutoDirectionalNavigation::default(),
+                    Spawn((
+                        bevy::ui::widget::Text::new(title),
+                        ThemedText,
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(PANEL_TEXT_ACCENT),
+                        UiFontBold,
+                    )),
+                ))
+                .id();
+
+            let mut body_node = Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                width: Val::Percent(100.0),
+                ..default()
+            };
+            if !initially_expanded {
+                body_node.display = Display::None;
+            }
+
+            let body = section
+                .spawn((body_node, Pickable::IGNORE, ThemedText))
+                .with_children(|body| {
+                    body.spawn((
+                        Node {
+                            height: Val::Px(1.0),
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(PANEL_DIVIDER),
+                        Pickable::IGNORE,
+                    ));
+                    build(body);
+                })
+                .id();
+
+            section.commands().entity(header_entity).insert((
+                SectionToggle { body },
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(28.0),
+                    justify_content: JustifyContent::FlexStart,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::new(Val::Px(10.0), Val::Px(6.0), Val::Px(0.0), Val::Px(0.0)),
+                    flex_grow: 0.0,
+                    ..default()
+                },
+            ));
+        });
+}
+
+fn spawn_edge_glow(parent: &mut ChildSpawnerCommands, edge: Edge) {
+    let node = match edge {
+        Edge::Top => Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            height: Val::Px(2.0),
+            ..default()
+        },
+        Edge::Left => Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            width: Val::Px(2.0),
+            ..default()
+        },
+        Edge::Right => Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            width: Val::Px(2.0),
+            ..default()
+        },
+    };
+
+    parent.spawn((node, BackgroundColor(PANEL_EDGE), Pickable::IGNORE));
+}
+
+fn spawn_grid_overlay(parent: &mut ChildSpawnerCommands) {
+    for step in GRID_STEPS {
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(step),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(1.0),
+                ..default()
+            },
+            BackgroundColor(GRID_LINE),
+            Pickable::IGNORE,
+        ));
+
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(step),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                height: Val::Px(1.0),
+                ..default()
+            },
+            BackgroundColor(GRID_LINE),
+            Pickable::IGNORE,
+        ));
+    }
+}
+
+fn spawn_corner_brackets(parent: &mut ChildSpawnerCommands) {
+    let offset = 6.0;
+    let length = 12.0;
+    let thickness = 2.0;
+
+    let corners = [
+        (Val::Px(offset), Val::Px(offset), false, false), // top-left
+        (Val::Px(offset), Val::Px(offset), true, false),  // top-right
+        (Val::Px(offset), Val::Px(offset), false, true),  // bottom-left
+        (Val::Px(offset), Val::Px(offset), true, true),   // bottom-right
+    ];
+
+    for (x_off, y_off, right, bottom) in corners {
+        let horiz = Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(length),
+            height: Val::Px(thickness),
+            ..default()
+        };
+        let vert = Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(thickness),
+            height: Val::Px(length),
+            ..default()
+        };
+
+        let mut horiz_node = horiz;
+        let mut vert_node = vert;
+
+        if right {
+            horiz_node.right = x_off;
+            vert_node.right = x_off;
+        } else {
+            horiz_node.left = x_off;
+            vert_node.left = x_off;
+        }
+
+        if bottom {
+            horiz_node.bottom = y_off;
+            vert_node.bottom = y_off;
+        } else {
+            horiz_node.top = y_off;
+            vert_node.top = y_off;
+        }
+
+        parent.spawn((horiz_node, BackgroundColor(PANEL_EDGE), Pickable::IGNORE));
+        parent.spawn((vert_node, BackgroundColor(PANEL_EDGE), Pickable::IGNORE));
+    }
 }
 
 fn slider_precision_from_step(step: f32) -> i32 {
@@ -1439,13 +1716,32 @@ fn apply_panel_visibility(
 fn apply_panel_layout(
     layout: Res<UiLayoutState>,
     ui_entities: Res<UiEntities>,
+    ui_state: Res<UIState>,
     mut panels: Query<&mut Node>,
 ) {
-    if !layout.is_changed() {
+    if !layout.is_changed() && !ui_state.is_changed() {
         return;
     }
 
+    let top = if ui_state.show_top_panel {
+        Val::Px(TOP_PANEL_HEIGHT_PX)
+    } else {
+        Val::Px(0.0)
+    };
+    let bottom = if ui_state.show_bottom_panel {
+        Val::Px(BOTTOM_PANEL_HEIGHT_PX)
+    } else {
+        Val::Px(0.0)
+    };
+
+    if let Ok(mut node) = panels.get_mut(ui_entities.left_panel) {
+        node.top = top;
+        node.bottom = bottom;
+    }
+
     if let Ok(mut node) = panels.get_mut(ui_entities.right_panel) {
+        node.top = top;
+        node.bottom = bottom;
         node.width = Val::Px(layout.right_panel_width_px);
     }
 }
@@ -1583,25 +1879,25 @@ fn update_camera_input_from_ui_hover(
 ) {
     let mut hovered = false;
 
-    if state.show_left_panel {
-        if let Ok(pos) = panels.get(ui_entities.left_panel) {
-            hovered |= pos.cursor_over;
-        }
+    if state.show_left_panel
+        && let Ok(pos) = panels.get(ui_entities.left_panel)
+    {
+        hovered |= pos.cursor_over;
     }
-    if state.show_right_panel {
-        if let Ok(pos) = panels.get(ui_entities.right_panel) {
-            hovered |= pos.cursor_over;
-        }
+    if state.show_right_panel
+        && let Ok(pos) = panels.get(ui_entities.right_panel)
+    {
+        hovered |= pos.cursor_over;
     }
-    if state.show_top_panel {
-        if let Ok(pos) = panels.get(ui_entities.top_panel) {
-            hovered |= pos.cursor_over;
-        }
+    if state.show_top_panel
+        && let Ok(pos) = panels.get(ui_entities.top_panel)
+    {
+        hovered |= pos.cursor_over;
     }
-    if state.show_bottom_panel {
-        if let Ok(pos) = panels.get(ui_entities.bottom_panel) {
-            hovered |= pos.cursor_over;
-        }
+    if state.show_bottom_panel
+        && let Ok(pos) = panels.get(ui_entities.bottom_panel)
+    {
+        hovered |= pos.cursor_over;
     }
 
     for mut pan_orbit in cameras.iter_mut() {
@@ -1610,22 +1906,11 @@ fn update_camera_input_from_ui_hover(
 }
 
 fn update_time_display(
-    mut texts: ParamSet<(
-        Query<&mut bevy::ui::widget::Text, With<TimeText>>,
-        Query<&mut bevy::ui::widget::Text, With<TimeScaleText>>,
-    )>,
+    mut texts: ParamSet<(Query<&mut bevy::ui::widget::Text, With<TimeText>>,)>,
     sim_time: Res<crate::orbital::SimulationTime>,
 ) {
     for mut text in texts.p0().iter_mut() {
-        text.0 = format!(
-            "UTC: {}",
-            sim_time
-                .current_utc
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        );
-    }
-    for mut text in texts.p1().iter_mut() {
-        text.0 = format!("{:.2}x", sim_time.time_scale);
+        text.0 = format!("UTC: {}", sim_time.current_utc.format("%Y-%m-%dT%H:%M:%S"));
     }
 }
 
@@ -1719,10 +2004,6 @@ fn update_text_input_display(
 fn process_pending_add(
     mut right_ui: ResMut<RightPanelUI>,
     mut store: ResMut<SatelliteStore>,
-    mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    config_bundle: Res<UiConfigBundle>,
-    render_assets: Res<SatelliteRenderAssets>,
     fetch_channels: Option<Res<FetchChannels>>,
 ) {
     if !right_ui.pending_add {
@@ -1750,28 +2031,14 @@ fn process_pending_add(
     let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
     let color = Color::hsl(hue, sat, light);
 
-    let entity = commands
-        .spawn((
-            Mesh3d(render_assets.sphere_mesh.clone()),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                emissive: color.to_linear() * config_bundle.render_cfg.emissive_intensity,
-                ..default()
-            })),
-            Satellite,
-            NoradId(norad),
-            crate::satellite::SatelliteColor(color),
-            Transform::from_xyz(crate::core::coordinates::EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
-        ))
-        .id();
-
+    // Insert entry; spawn_missing_satellite_entities_system will create the entity
     store.items.insert(
         norad,
         crate::satellite::SatEntry {
             norad,
             name: None,
             color,
-            entity: Some(entity),
+            entity: None,
             tle: None,
             propagator: None,
             error: None,
@@ -1780,8 +2047,6 @@ fn process_pending_add(
             is_clicked: false,
         },
     );
-    store.entity_by_norad.insert(norad, entity);
-
     right_ui.error = None;
     if let Some(fetch) = fetch_channels {
         if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
@@ -2236,23 +2501,26 @@ fn sync_widget_states(
 }
 
 fn sync_slider_visuals(
-    mut sliders: Query<(
-        Entity,
-        &SliderValue,
-        &SliderRange,
-        Option<&SliderPrecision>,
-        Option<&mut BackgroundGradient>,
-    ), With<Slider>>,
+    mut sliders: Query<
+        (
+            Entity,
+            &SliderValue,
+            &SliderRange,
+            Option<&SliderPrecision>,
+            Option<&mut BackgroundGradient>,
+        ),
+        With<Slider>,
+    >,
     children: Query<&Children>,
     mut texts: Query<&mut bevy::ui::widget::Text>,
 ) {
     for (entity, value, range, precision, gradient) in sliders.iter_mut() {
-        if let Some(mut gradient) = gradient {
-            if let [Gradient::Linear(linear_gradient)] = &mut gradient.0[..] {
-                let percent_value = (range.thumb_position(value.0) * 100.0).clamp(0.0, 100.0);
-                linear_gradient.stops[1].point = Val::Percent(percent_value);
-                linear_gradient.stops[2].point = Val::Percent(percent_value);
-            }
+        if let Some(mut gradient) = gradient
+            && let [Gradient::Linear(linear_gradient)] = &mut gradient.0[..]
+        {
+            let percent_value = (range.thumb_position(value.0) * 100.0).clamp(0.0, 100.0);
+            linear_gradient.stops[1].point = Val::Percent(percent_value);
+            linear_gradient.stops[2].point = Val::Percent(percent_value);
         }
 
         let precision = precision.map(|p| p.0).unwrap_or(0);
@@ -2318,7 +2586,6 @@ fn handle_button_activate(
                     }
                 }
                 store.items.clear();
-                store.entity_by_norad.clear();
                 right_ui.error = None;
                 selected.tracking = None;
             }
@@ -2349,13 +2616,12 @@ fn handle_button_activate(
                 }
             }
             SatelliteAction::Remove => {
-                if let Some(entry) = store.items.remove(&action.norad) {
-                    if let Some(entity) = entry.entity {
-                        commands.entity(entity).despawn_children();
-                        commands.entity(entity).despawn();
-                    }
+                if let Some(entry) = store.items.remove(&action.norad)
+                    && let Some(entity) = entry.entity
+                {
+                    commands.entity(entity).despawn_children();
+                    commands.entity(entity).despawn();
                 }
-                store.entity_by_norad.remove(&action.norad);
                 if selected.tracking == Some(action.norad) {
                     selected.tracking = None;
                 }
@@ -2364,6 +2630,23 @@ fn handle_button_activate(
                 }
             }
         }
+    }
+}
+
+fn handle_section_toggle(
+    ev: On<Activate>,
+    q_toggle: Query<&SectionToggle>,
+    mut nodes: Query<&mut Node>,
+) {
+    let Ok(toggle) = q_toggle.get(ev.entity) else {
+        return;
+    };
+
+    if let Ok(mut node) = nodes.get_mut(toggle.body) {
+        node.display = match node.display {
+            Display::None => Display::Flex,
+            _ => Display::None,
+        };
     }
 }
 
@@ -2413,12 +2696,12 @@ fn handle_checkbox_change(
         return;
     }
 
-    if let Ok(toggle) = q_sat_toggle.get(ev.source) {
-        if let Some(entry) = store.items.get_mut(&toggle.norad) {
-            match toggle.kind {
-                SatelliteToggleKind::GroundTrack => entry.show_ground_track = ev.value,
-                SatelliteToggleKind::Trail => entry.show_trail = ev.value,
-            }
+    if let Ok(toggle) = q_sat_toggle.get(ev.source)
+        && let Some(entry) = store.items.get_mut(&toggle.norad)
+    {
+        match toggle.kind {
+            SatelliteToggleKind::GroundTrack => entry.show_ground_track = ev.value,
+            SatelliteToggleKind::Trail => entry.show_trail = ev.value,
         }
     }
 }

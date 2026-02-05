@@ -80,7 +80,7 @@ pub fn spawn_missing_satellite_entities_system(
 
     // Collect satellites that need entities
     for (norad, entry) in store.items.iter() {
-        if entry.entity.is_none() && entry.tle.is_some() {
+        if entry.entity.is_none() {
             satellites_to_spawn.push(*norad);
         }
     }
@@ -107,7 +107,6 @@ pub fn spawn_missing_satellite_entities_system(
                 ))
                 .id();
             entry.entity = Some(entity);
-            store.entity_by_norad.insert(norad, entity);
         }
     }
 }
@@ -185,29 +184,18 @@ pub fn draw_orbit_trails_system(
                 continue;
             }
 
-            let base_color = entry.color;
+            let srgba = entry.color.to_srgba();
+            let trail_length = trail.history.len() as f32;
 
             // Draw lines between consecutive trail points
-            for window in trail.history.windows(2) {
+            for (i, window) in trail.history.windows(2).enumerate() {
                 let point1 = &window[0];
                 let point2 = &window[1];
 
                 // Calculate alpha based on position in trail (newer = more opaque)
-                let trail_position = trail
-                    .history
-                    .iter()
-                    .position(|p| std::ptr::eq(p, point1))
-                    .unwrap_or(0) as f32;
-                let trail_length = trail.history.len() as f32;
-                let alpha = (0.1 + 0.9 * (trail_position / trail_length.max(1.0))).min(1.0);
+                let alpha = (0.1 + 0.9 * (i as f32 / trail_length.max(1.0))).min(1.0);
 
-                // Create color with fade
-                let trail_color = Color::srgba(
-                    base_color.to_srgba().red,
-                    base_color.to_srgba().green,
-                    base_color.to_srgba().blue,
-                    alpha,
-                );
+                let trail_color = Color::srgba(srgba.red, srgba.green, srgba.blue, alpha);
 
                 // Draw line segment (convert canonical ECEF to Bevy render space)
                 let point1_bevy = ecef_to_bevy_km(point1.position_ecef_km);
@@ -226,7 +214,7 @@ pub fn move_camera_to_satellite(
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
     if let Some(norad) = selected.selected.take() {
-        if let Some(&entity) = store.entity_by_norad.get(&norad) {
+        if let Some(entity) = store.items.get(&norad).and_then(|e| e.entity) {
             if let Ok(sat_transform) = q_sat.get(entity) {
                 let sat_pos = sat_transform.translation;
 
@@ -289,7 +277,7 @@ pub fn track_satellite_continuously(
 ) {
     // Only track if we have a tracking target
     if let Some(tracking_norad) = tracking.tracking
-        && let Some(&entity) = store.entity_by_norad.get(&tracking_norad)
+        && let Some(entity) = store.items.get(&tracking_norad).and_then(|e| e.entity)
         && let Ok(sat_transform) = q_sat.get(entity)
     {
         let sat_pos = sat_transform.translation;
