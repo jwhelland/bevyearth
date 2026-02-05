@@ -102,9 +102,6 @@ fn queue_set_checked(commands: &mut Commands, entity: Entity, checked: bool) {
 }
 
 #[derive(Component)]
-struct TimeScaleText;
-
-#[derive(Component)]
 struct SatelliteCountText;
 
 #[derive(Component)]
@@ -143,10 +140,6 @@ enum CheckboxBinding {
     TrailsAll,
     TracksAll,
     HeatmapEnabled,
-    ShowLeftPanel,
-    ShowRightPanel,
-    ShowTopPanel,
-    ShowBottomPanel,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -196,6 +189,19 @@ enum SatelliteAction {
 enum SatelliteToggleKind {
     GroundTrack,
     Trail,
+}
+
+#[derive(Component, Clone, Copy)]
+enum PanelToggleKind {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Component, Clone, Copy)]
+struct PanelToggle {
+    kind: PanelToggleKind,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -261,6 +267,7 @@ impl Plugin for UiSystemsPlugin {
                 toggle_panels_keyboard,
                 apply_panel_visibility,
                 apply_panel_layout,
+                sync_panel_toggle_buttons,
                 scroll_right_panel_on_wheel,
                 update_time_display,
                 update_status_texts,
@@ -1154,6 +1161,8 @@ fn setup_ui(
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(8.0),
+                    width: Val::Px(220.0),
+                    flex_grow: 0.0,
                     ..default()
                 },
                 Pickable::IGNORE,
@@ -1161,14 +1170,27 @@ fn setup_ui(
             ))
             .with_children(|left| {
                 left.spawn((
-                    TimeText,
-                    bevy::ui::widget::Text::new("UTC: --"),
-                    ThemedText,
-                    TextFont {
-                        font_size: 13.0,
+                    Node {
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
                         ..default()
                     },
-                ));
+                    BackgroundColor(PANEL_INNER_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    Pickable::IGNORE,
+                    ThemedText,
+                ))
+                .with_children(|chip| {
+                    chip.spawn((
+                        TimeText,
+                        bevy::ui::widget::Text::new("UTC: --"),
+                        ThemedText,
+                        TextFont {
+                            font_size: 15.0,
+                            ..default()
+                        },
+                    ));
+                });
             });
 
         parent
@@ -1185,54 +1207,58 @@ fn setup_ui(
                 ThemedText,
             ))
             .with_children(|middle| {
-                spawn_labeled_slider(
-                    middle,
-                    "Speed",
-                    SliderBinding::TimeScale,
-                    1.0,
-                    1000.0,
-                    sim_time.time_scale,
-                    1.0,
-                );
+                spawn_speed_slider(middle, sim_time.time_scale);
                 middle
-                    .spawn(button(
-                        ButtonProps::default(),
-                        (
-                            ButtonAction::TimeScale1x,
-                            AutoDirectionalNavigation::default(),
-                        ),
-                        Spawn((
-                            bevy::ui::widget::Text::new("1x"),
-                            ThemedText,
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                        )),
-                    ))
-                    .insert(Node {
+                    .spawn(Node {
                         width: Val::Px(56.0),
                         flex_grow: 0.0,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
                         ..default()
+                    })
+                    .with_children(|container| {
+                        container
+                            .spawn(button(
+                                ButtonProps::default(),
+                                (
+                                    ButtonAction::TimeScale1x,
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                                Spawn((
+                                    bevy::ui::widget::Text::new("1x"),
+                                    ThemedText,
+                                    TextFont {
+                                        font_size: 12.0,
+                                        ..default()
+                                    },
+                                )),
+                            ))
+                            .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
                     });
 
                 middle
-                    .spawn(button(
-                        ButtonProps::default(),
-                        (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
-                        Spawn((
-                            bevy::ui::widget::Text::new("Now"),
-                            ThemedText,
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                        )),
-                    ))
-                    .insert(Node {
+                    .spawn(Node {
                         width: Val::Px(64.0),
                         flex_grow: 0.0,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
                         ..default()
+                    })
+                    .with_children(|container| {
+                        container
+                            .spawn(button(
+                                ButtonProps::default(),
+                                (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
+                                Spawn((
+                                    bevy::ui::widget::Text::new("Now"),
+                                    ThemedText,
+                                    TextFont {
+                                        font_size: 12.0,
+                                        ..default()
+                                    },
+                                )),
+                            ))
+                            .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
                     });
             });
 
@@ -1248,74 +1274,10 @@ fn setup_ui(
                 ThemedText,
             ))
             .with_children(|right| {
-                right.spawn((
-                    bevy::ui::widget::Text::new("Panels:"),
-                    ThemedText,
-                    TextFont {
-                        font_size: 11.0,
-                        ..default()
-                    },
-                ));
-
-                right.spawn((checkbox(
-                    (
-                        CheckboxBinding::ShowLeftPanel,
-                        AutoDirectionalNavigation::default(),
-                    ),
-                    Spawn((
-                        bevy::ui::widget::Text::new("Vis"),
-                        ThemedText,
-                        TextFont {
-                            font_size: 11.0,
-                            ..default()
-                        },
-                    )),
-                ),));
-
-                right.spawn((checkbox(
-                    (
-                        CheckboxBinding::ShowRightPanel,
-                        AutoDirectionalNavigation::default(),
-                    ),
-                    Spawn((
-                        bevy::ui::widget::Text::new("Sat"),
-                        ThemedText,
-                        TextFont {
-                            font_size: 11.0,
-                            ..default()
-                        },
-                    )),
-                ),));
-
-                right.spawn((checkbox(
-                    (
-                        CheckboxBinding::ShowTopPanel,
-                        AutoDirectionalNavigation::default(),
-                    ),
-                    Spawn((
-                        bevy::ui::widget::Text::new("Time"),
-                        ThemedText,
-                        TextFont {
-                            font_size: 11.0,
-                            ..default()
-                        },
-                    )),
-                ),));
-
-                right.spawn((checkbox(
-                    (
-                        CheckboxBinding::ShowBottomPanel,
-                        AutoDirectionalNavigation::default(),
-                    ),
-                    Spawn((
-                        bevy::ui::widget::Text::new("Status"),
-                        ThemedText,
-                        TextFont {
-                            font_size: 11.0,
-                            ..default()
-                        },
-                    )),
-                ),));
+                spawn_panel_toggle_button(right, "Vis", PanelToggleKind::Left);
+                spawn_panel_toggle_button(right, "Sat", PanelToggleKind::Right);
+                spawn_panel_toggle_button(right, "Time", PanelToggleKind::Top);
+                spawn_panel_toggle_button(right, "Status", PanelToggleKind::Bottom);
             });
     });
 
@@ -1387,6 +1349,77 @@ fn spawn_labeled_slider(
                     AutoDirectionalNavigation::default(),
                 ),
             ),));
+        });
+}
+
+fn spawn_speed_slider(parent: &mut ChildSpawnerCommands, value: f32) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                width: Val::Percent(100.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|row| {
+            row.spawn((
+                bevy::ui::widget::Text::new("Speed"),
+                ThemedText,
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(PANEL_TEXT_ACCENT),
+                UiFontBold,
+            ));
+            row.spawn((slider(
+                SliderProps {
+                    value,
+                    min: 1.0,
+                    max: 1000.0,
+                },
+                (
+                    SliderBinding::TimeScale,
+                    SliderStep(1.0),
+                    SliderPrecision(0),
+                    AutoDirectionalNavigation::default(),
+                ),
+            ),));
+        });
+}
+
+fn spawn_panel_toggle_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    kind: PanelToggleKind,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Px(64.0),
+            flex_grow: 0.0,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|container| {
+            container
+                .spawn(button(
+                    ButtonProps::default(),
+                    (PanelToggle { kind }, AutoDirectionalNavigation::default()),
+                    Spawn((
+                        bevy::ui::widget::Text::new(label),
+                        ThemedText,
+                        TextFont {
+                            font_size: 12.0,
+                            ..default()
+                        },
+                    )),
+                ))
+                .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
         });
 }
 
@@ -1910,7 +1943,7 @@ fn update_time_display(
     sim_time: Res<crate::orbital::SimulationTime>,
 ) {
     for mut text in texts.p0().iter_mut() {
-        text.0 = format!("UTC: {}", sim_time.current_utc.format("%Y-%m-%dT%H:%M:%S"));
+        text.0 = format!("UTC: {}", sim_time.current_utc.format("%Y-%m-%d %H:%M:%S"));
     }
 }
 
@@ -1997,6 +2030,28 @@ fn update_text_input_display(
             text.0 = err.clone();
         } else {
             text.0.clear();
+        }
+    }
+}
+
+fn sync_panel_toggle_buttons(
+    ui_state: Res<UIState>,
+    mut buttons: Query<(&PanelToggle, &mut ButtonVariant)>,
+) {
+    for (toggle, mut variant) in buttons.iter_mut() {
+        let is_on = match toggle.kind {
+            PanelToggleKind::Left => ui_state.show_left_panel,
+            PanelToggleKind::Right => ui_state.show_right_panel,
+            PanelToggleKind::Top => ui_state.show_top_panel,
+            PanelToggleKind::Bottom => ui_state.show_bottom_panel,
+        };
+        let target = if is_on {
+            ButtonVariant::Primary
+        } else {
+            ButtonVariant::Normal
+        };
+        if *variant != target {
+            *variant = target;
         }
     }
 }
@@ -2399,10 +2454,6 @@ fn sync_widget_states(
                             .all(|s| s.show_ground_track)
                 }
                 CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled,
-                CheckboxBinding::ShowLeftPanel => ui_state.show_left_panel,
-                CheckboxBinding::ShowRightPanel => ui_state.show_right_panel,
-                CheckboxBinding::ShowTopPanel => ui_state.show_top_panel,
-                CheckboxBinding::ShowBottomPanel => ui_state.show_bottom_panel,
             };
 
             match (should_check, checked.is_some()) {
@@ -2547,10 +2598,12 @@ fn handle_button_activate(
     ev: On<Activate>,
     q_action: Query<&ButtonAction>,
     q_sat_action: Query<&SatelliteActionButton>,
+    q_panel_toggle: Query<&PanelToggle>,
     mut right_ui: ResMut<RightPanelUI>,
     mut store: ResMut<SatelliteStore>,
     mut selected: ResMut<SelectedSatellite>,
     mut sim_time: ResMut<crate::orbital::SimulationTime>,
+    mut ui_state: ResMut<UIState>,
     mut commands: Commands,
     fetch_channels: Option<Res<FetchChannels>>,
 ) {
@@ -2631,6 +2684,15 @@ fn handle_button_activate(
             }
         }
     }
+
+    if let Ok(toggle) = q_panel_toggle.get(ev.entity) {
+        match toggle.kind {
+            PanelToggleKind::Left => ui_state.show_left_panel = !ui_state.show_left_panel,
+            PanelToggleKind::Right => ui_state.show_right_panel = !ui_state.show_right_panel,
+            PanelToggleKind::Top => ui_state.show_top_panel = !ui_state.show_top_panel,
+            PanelToggleKind::Bottom => ui_state.show_bottom_panel = !ui_state.show_bottom_panel,
+        }
+    }
 }
 
 fn handle_section_toggle(
@@ -2688,10 +2750,6 @@ fn handle_checkbox_change(
                 }
             }
             CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled = ev.value,
-            CheckboxBinding::ShowLeftPanel => ui_state.show_left_panel = ev.value,
-            CheckboxBinding::ShowRightPanel => ui_state.show_right_panel = ev.value,
-            CheckboxBinding::ShowTopPanel => ui_state.show_top_panel = ev.value,
-            CheckboxBinding::ShowBottomPanel => ui_state.show_bottom_panel = ev.value,
         }
         return;
     }
