@@ -3,6 +3,7 @@
 use bevy::camera::Viewport;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::ecs::spawn::Spawn;
+use bevy::ecs::system::SystemParam;
 use bevy::ecs::world::EntityWorldMut;
 use bevy::input::keyboard::KeyCode;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
@@ -293,6 +294,78 @@ impl LabelStyle {
     }
 }
 
+type UiCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Camera,
+        Option<&'static Camera2d>,
+        Option<&'static Camera3d>,
+        Option<&'static MainCamera>,
+    ),
+>;
+
+type SliderVisualQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static SliderValue,
+        &'static SliderRange,
+        Option<&'static SliderPrecision>,
+        Option<&'static mut BackgroundGradient>,
+    ),
+    With<Slider>,
+>;
+
+#[derive(SystemParam)]
+struct SyncWidgetStateParams<'w, 's> {
+    store: Res<'w, SatelliteStore>,
+    ui_state: Res<'w, UIState>,
+    arrows: Res<'w, ArrowConfig>,
+    config_bundle: Res<'w, UiConfigBundle>,
+    heatmap_cfg: Res<'w, HeatmapConfig>,
+    selected: Res<'w, SelectedSatellite>,
+    sim_time: Res<'w, crate::orbital::SimulationTime>,
+    right_ui: Res<'w, RightPanelUI>,
+    checkboxes: Query<'w, 's, (Entity, &'static CheckboxBinding, Option<&'static Checked>)>,
+    range_modes: Query<'w, 's, (Entity, &'static RangeModeBinding, Option<&'static Checked>)>,
+    group_choices: Query<'w, 's, (Entity, &'static GroupChoice, Option<&'static Checked>)>,
+    sliders: Query<'w, 's, (Entity, &'static SliderBinding), With<SliderValue>>,
+    slider_values: Query<'w, 's, &'static SliderValue>,
+    satellite_toggles: Query<
+        'w,
+        's,
+        (Entity, &'static SatelliteToggle, Option<&'static Checked>),
+    >,
+    commands: Commands<'w, 's>,
+}
+
+#[derive(SystemParam)]
+struct ButtonActivateParams<'w, 's> {
+    q_action: Query<'w, 's, &'static ButtonAction>,
+    q_sat_action: Query<'w, 's, &'static SatelliteActionButton>,
+    q_panel_toggle: Query<'w, 's, &'static PanelToggle>,
+    right_ui: ResMut<'w, RightPanelUI>,
+    store: ResMut<'w, SatelliteStore>,
+    selected: ResMut<'w, SelectedSatellite>,
+    sim_time: ResMut<'w, crate::orbital::SimulationTime>,
+    ui_state: ResMut<'w, UIState>,
+    commands: Commands<'w, 's>,
+    fetch_channels: Option<Res<'w, FetchChannels>>,
+}
+
+#[derive(SystemParam)]
+struct CheckboxChangeParams<'w, 's> {
+    q_binding: Query<'w, 's, &'static CheckboxBinding>,
+    q_sat_toggle: Query<'w, 's, &'static SatelliteToggle>,
+    arrows: ResMut<'w, ArrowConfig>,
+    ui_state: ResMut<'w, UIState>,
+    config_bundle: ResMut<'w, UiConfigBundle>,
+    heatmap_cfg: ResMut<'w, HeatmapConfig>,
+    store: ResMut<'w, SatelliteStore>,
+}
+
 /// Plugin that registers UI systems and observers
 pub struct UiSystemsPlugin;
 
@@ -360,14 +433,7 @@ impl Plugin for UiSystemsPlugin {
     }
 }
 
-fn enforce_ui_camera_settings(
-    mut cameras: Query<(
-        &mut Camera,
-        Option<&Camera2d>,
-        Option<&Camera3d>,
-        Option<&MainCamera>,
-    )>,
-) {
+fn enforce_ui_camera_settings(mut cameras: UiCameraQuery<'_, '_>) {
     // Ensure UI cameras never clear after 3D, and prevent non-main cameras from wiping the frame.
     for (mut camera, is_2d, is_3d, is_main) in cameras.iter_mut() {
         if is_main.is_some() {
@@ -1237,6 +1303,16 @@ fn setup_ui(
     });
 }
 
+struct LabeledSliderRowProps<'a> {
+    label: &'a str,
+    label_style: LabelStyle,
+    binding: SliderBinding,
+    min: f32,
+    max: f32,
+    value: f32,
+    step: f32,
+}
+
 fn spawn_labeled_slider(
     parent: &mut ChildSpawnerCommands,
     label: &str,
@@ -1248,13 +1324,15 @@ fn spawn_labeled_slider(
 ) {
     spawn_labeled_slider_row(
         parent,
-        label,
-        LabelStyle::normal(12.0),
-        binding,
-        min,
-        max,
-        value,
-        step,
+        LabeledSliderRowProps {
+            label,
+            label_style: LabelStyle::normal(12.0),
+            binding,
+            min,
+            max,
+            value,
+            step,
+        },
     );
 }
 
@@ -1309,17 +1387,8 @@ fn spawn_pill_chip<B: Bundle>(
         });
 }
 
-fn spawn_labeled_slider_row(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    label_style: LabelStyle,
-    binding: SliderBinding,
-    min: f32,
-    max: f32,
-    value: f32,
-    step: f32,
-) {
-    let precision = slider_precision_from_step(step);
+fn spawn_labeled_slider_row(parent: &mut ChildSpawnerCommands, props: LabeledSliderRowProps<'_>) {
+    let precision = slider_precision_from_step(props.step);
     parent
         .spawn((
             Node {
@@ -1333,12 +1402,16 @@ fn spawn_labeled_slider_row(
             ThemedText,
         ))
         .with_children(|row| {
-            spawn_styled_text(row, label, label_style, ());
+            spawn_styled_text(row, props.label, props.label_style, ());
             row.spawn((slider(
-                SliderProps { value, min, max },
+                SliderProps {
+                    value: props.value,
+                    min: props.min,
+                    max: props.max,
+                },
                 (
-                    binding,
-                    SliderStep(step),
+                    props.binding,
+                    SliderStep(props.step),
                     SliderPrecision(precision),
                     AutoDirectionalNavigation::default(),
                 ),
@@ -1415,13 +1488,15 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
         .with_children(|middle| {
             spawn_labeled_slider_row(
                 middle,
-                "Speed",
-                LabelStyle::accent(12.0),
-                SliderBinding::TimeScale,
-                1.0,
-                1000.0,
-                time_scale,
-                1.0,
+                LabeledSliderRowProps {
+                    label: "Speed",
+                    label_style: LabelStyle::accent(12.0),
+                    binding: SliderBinding::TimeScale,
+                    min: 1.0,
+                    max: 1000.0,
+                    value: time_scale,
+                    step: 1.0,
+                },
             );
             spawn_fixed_button(
                 middle,
@@ -2120,6 +2195,7 @@ fn update_time_display(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_status_texts(
     store: Res<SatelliteStore>,
     mut texts: ParamSet<(
@@ -2180,6 +2256,7 @@ fn handle_group_loading_text(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_text_input_display(
     right_ui: Res<RightPanelUI>,
     mut texts: ParamSet<(
@@ -2574,147 +2651,141 @@ fn spawn_satellite_row(
         });
 }
 
-fn sync_widget_states(
-    store: Res<SatelliteStore>,
-    ui_state: Res<UIState>,
-    arrows: Res<ArrowConfig>,
-    config_bundle: Res<UiConfigBundle>,
-    heatmap_cfg: Res<HeatmapConfig>,
-    selected: Res<SelectedSatellite>,
-    sim_time: Res<crate::orbital::SimulationTime>,
-    right_ui: Res<RightPanelUI>,
-    mut checkboxes: Query<(Entity, &CheckboxBinding, Option<&Checked>)>,
-    mut range_modes: Query<(Entity, &RangeModeBinding, Option<&Checked>)>,
-    mut group_choices: Query<(Entity, &GroupChoice, Option<&Checked>)>,
-    sliders: Query<(Entity, &SliderBinding), With<SliderValue>>,
-    slider_values: Query<&SliderValue>,
-    mut satellite_toggles: Query<(Entity, &SatelliteToggle, Option<&Checked>)>,
-    mut commands: Commands,
-) {
-    if ui_state.is_changed()
-        || arrows.is_changed()
-        || config_bundle.is_changed()
-        || heatmap_cfg.is_changed()
-        || store.is_changed()
-        || selected.is_changed()
-        || sim_time.is_changed()
-        || right_ui.is_changed()
+fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
+    if params.ui_state.is_changed()
+        || params.arrows.is_changed()
+        || params.config_bundle.is_changed()
+        || params.heatmap_cfg.is_changed()
+        || params.store.is_changed()
+        || params.selected.is_changed()
+        || params.sim_time.is_changed()
+        || params.right_ui.is_changed()
     {
-        for (entity, binding, checked) in checkboxes.iter_mut() {
+        for (entity, binding, checked) in params.checkboxes.iter_mut() {
             let should_check = match binding {
-                CheckboxBinding::ShowAxes => ui_state.show_axes,
-                CheckboxBinding::ShowArrows => arrows.enabled,
-                CheckboxBinding::ArrowGradient => arrows.gradient_enabled,
-                CheckboxBinding::ArrowGradientLog => arrows.gradient_log_scale,
-                CheckboxBinding::GroundTracksEnabled => config_bundle.ground_track_cfg.enabled,
-                CheckboxBinding::GizmoEnabled => config_bundle.gizmo_cfg.enabled,
-                CheckboxBinding::GizmoShowCenterDot => config_bundle.gizmo_cfg.show_center_dot,
+                CheckboxBinding::ShowAxes => params.ui_state.show_axes,
+                CheckboxBinding::ShowArrows => params.arrows.enabled,
+                CheckboxBinding::ArrowGradient => params.arrows.gradient_enabled,
+                CheckboxBinding::ArrowGradientLog => params.arrows.gradient_log_scale,
+                CheckboxBinding::GroundTracksEnabled => {
+                    params.config_bundle.ground_track_cfg.enabled
+                }
+                CheckboxBinding::GizmoEnabled => params.config_bundle.gizmo_cfg.enabled,
+                CheckboxBinding::GizmoShowCenterDot => {
+                    params.config_bundle.gizmo_cfg.show_center_dot
+                }
                 CheckboxBinding::TrailsAll => {
-                    !store.items.is_empty()
-                        && store
+                    !params.store.items.is_empty()
+                        && params
+                            .store
                             .items
                             .values()
                             .filter(|s| s.propagator.is_some())
                             .all(|s| s.show_trail)
                 }
                 CheckboxBinding::TracksAll => {
-                    !store.items.is_empty()
-                        && store
+                    !params.store.items.is_empty()
+                        && params
+                            .store
                             .items
                             .values()
                             .filter(|s| s.propagator.is_some())
                             .all(|s| s.show_ground_track)
                 }
-                CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled,
+                CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled,
             };
 
             match (should_check, checked.is_some()) {
                 (true, false) => {
-                    queue_set_checked(&mut commands, entity, true);
+                    queue_set_checked(&mut params.commands, entity, true);
                 }
                 (false, true) => {
-                    queue_set_checked(&mut commands, entity, false);
+                    queue_set_checked(&mut params.commands, entity, false);
                 }
                 _ => {}
             }
         }
 
-        for (entity, binding, checked) in range_modes.iter_mut() {
+        for (entity, binding, checked) in params.range_modes.iter_mut() {
             let should_check = match binding {
-                RangeModeBinding::Auto => heatmap_cfg.range_mode == RangeMode::Auto,
-                RangeModeBinding::Fixed => heatmap_cfg.range_mode == RangeMode::Fixed,
+                RangeModeBinding::Auto => params.heatmap_cfg.range_mode == RangeMode::Auto,
+                RangeModeBinding::Fixed => params.heatmap_cfg.range_mode == RangeMode::Fixed,
             };
             match (should_check, checked.is_some()) {
                 (true, false) => {
-                    queue_set_checked(&mut commands, entity, true);
+                    queue_set_checked(&mut params.commands, entity, true);
                 }
                 (false, true) => {
-                    queue_set_checked(&mut commands, entity, false);
+                    queue_set_checked(&mut params.commands, entity, false);
                 }
                 _ => {}
             }
         }
 
-        if let Some(selected_group) = right_ui.selected_group.as_deref() {
-            for (entity, choice, checked) in group_choices.iter_mut() {
+        if let Some(selected_group) = params.right_ui.selected_group.as_deref() {
+            for (entity, choice, checked) in params.group_choices.iter_mut() {
                 let should_check = choice.0 == selected_group;
                 match (should_check, checked.is_some()) {
                     (true, false) => {
-                        queue_set_checked(&mut commands, entity, true);
+                        queue_set_checked(&mut params.commands, entity, true);
                     }
                     (false, true) => {
-                        queue_set_checked(&mut commands, entity, false);
+                        queue_set_checked(&mut params.commands, entity, false);
                     }
                     _ => {}
                 }
             }
         }
 
-        for (entity, binding) in sliders.iter() {
+        for (entity, binding) in params.sliders.iter() {
             let value = match binding {
-                SliderBinding::GradientNear => arrows.gradient_near_km,
-                SliderBinding::GradientFar => arrows.gradient_far_km,
-                SliderBinding::GroundTrackRadius => config_bundle.ground_track_cfg.radius_km,
-                SliderBinding::GizmoSegments => config_bundle.gizmo_cfg.circle_segments as f32,
-                SliderBinding::GizmoCenterDotSize => config_bundle.gizmo_cfg.center_dot_size,
-                SliderBinding::TrailMaxPoints => config_bundle.trail_cfg.max_points as f32,
+                SliderBinding::GradientNear => params.arrows.gradient_near_km,
+                SliderBinding::GradientFar => params.arrows.gradient_far_km,
+                SliderBinding::GroundTrackRadius => params.config_bundle.ground_track_cfg.radius_km,
+                SliderBinding::GizmoSegments => {
+                    params.config_bundle.gizmo_cfg.circle_segments as f32
+                }
+                SliderBinding::GizmoCenterDotSize => params.config_bundle.gizmo_cfg.center_dot_size,
+                SliderBinding::TrailMaxPoints => params.config_bundle.trail_cfg.max_points as f32,
                 SliderBinding::TrailUpdateInterval => {
-                    config_bundle.trail_cfg.update_interval_seconds
+                    params.config_bundle.trail_cfg.update_interval_seconds
                 }
-                SliderBinding::HeatmapUpdatePeriod => heatmap_cfg.update_period_s,
-                SliderBinding::HeatmapOpacity => heatmap_cfg.color_alpha,
-                SliderBinding::HeatmapFixedMax => heatmap_cfg.fixed_max.unwrap_or(20) as f32,
-                SliderBinding::HeatmapChunkSize => heatmap_cfg.chunk_size as f32,
-                SliderBinding::HeatmapChunksPerFrame => heatmap_cfg.chunks_per_frame as f32,
-                SliderBinding::SatelliteSphereRadius => config_bundle.render_cfg.sphere_radius,
+                SliderBinding::HeatmapUpdatePeriod => params.heatmap_cfg.update_period_s,
+                SliderBinding::HeatmapOpacity => params.heatmap_cfg.color_alpha,
+                SliderBinding::HeatmapFixedMax => {
+                    params.heatmap_cfg.fixed_max.unwrap_or(20) as f32
+                }
+                SliderBinding::HeatmapChunkSize => params.heatmap_cfg.chunk_size as f32,
+                SliderBinding::HeatmapChunksPerFrame => params.heatmap_cfg.chunks_per_frame as f32,
+                SliderBinding::SatelliteSphereRadius => params.config_bundle.render_cfg.sphere_radius,
                 SliderBinding::SatelliteEmissiveIntensity => {
-                    config_bundle.render_cfg.emissive_intensity
+                    params.config_bundle.render_cfg.emissive_intensity
                 }
-                SliderBinding::TrackingDistance => selected.tracking_offset,
-                SliderBinding::TrackingSmoothness => selected.smooth_factor,
-                SliderBinding::TimeScale => sim_time.time_scale,
+                SliderBinding::TrackingDistance => params.selected.tracking_offset,
+                SliderBinding::TrackingSmoothness => params.selected.smooth_factor,
+                SliderBinding::TimeScale => params.sim_time.time_scale,
             };
-            if let Ok(current) = slider_values.get(entity) {
+            if let Ok(current) = params.slider_values.get(entity) {
                 if (current.0 - value).abs() > f32::EPSILON {
-                    commands.entity(entity).insert(SliderValue(value));
+                    params.commands.entity(entity).insert(SliderValue(value));
                 }
             } else {
-                commands.entity(entity).insert(SliderValue(value));
+                params.commands.entity(entity).insert(SliderValue(value));
             }
         }
 
-        for (entity, toggle, checked) in satellite_toggles.iter_mut() {
-            if let Some(entry) = store.items.get(&toggle.norad) {
+        for (entity, toggle, checked) in params.satellite_toggles.iter_mut() {
+            if let Some(entry) = params.store.items.get(&toggle.norad) {
                 let should_check = match toggle.kind {
                     SatelliteToggleKind::GroundTrack => entry.show_ground_track,
                     SatelliteToggleKind::Trail => entry.show_trail,
                 };
                 match (should_check, checked.is_some()) {
                     (true, false) => {
-                        queue_set_checked(&mut commands, entity, true);
+                        queue_set_checked(&mut params.commands, entity, true);
                     }
                     (false, true) => {
-                        queue_set_checked(&mut commands, entity, false);
+                        queue_set_checked(&mut params.commands, entity, false);
                     }
                     _ => {}
                 }
@@ -2724,16 +2795,7 @@ fn sync_widget_states(
 }
 
 fn sync_slider_visuals(
-    mut sliders: Query<
-        (
-            Entity,
-            &SliderValue,
-            &SliderRange,
-            Option<&SliderPrecision>,
-            Option<&mut BackgroundGradient>,
-        ),
-        With<Slider>,
-    >,
+    mut sliders: SliderVisualQuery<'_, '_>,
     children: Query<&Children>,
     mut texts: Query<&mut bevy::ui::widget::Text>,
 ) {
@@ -2766,103 +2828,101 @@ fn sync_slider_visuals(
     }
 }
 
-fn handle_button_activate(
-    ev: On<Activate>,
-    q_action: Query<&ButtonAction>,
-    q_sat_action: Query<&SatelliteActionButton>,
-    q_panel_toggle: Query<&PanelToggle>,
-    mut right_ui: ResMut<RightPanelUI>,
-    mut store: ResMut<SatelliteStore>,
-    mut selected: ResMut<SelectedSatellite>,
-    mut sim_time: ResMut<crate::orbital::SimulationTime>,
-    mut ui_state: ResMut<UIState>,
-    mut commands: Commands,
-    fetch_channels: Option<Res<FetchChannels>>,
-) {
-    if let Ok(action) = q_action.get(ev.entity) {
+fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_, '_>) {
+    if let Ok(action) = params.q_action.get(ev.entity) {
         match action {
             ButtonAction::LoadGroup => {
-                if right_ui.group_loading {
+                if params.right_ui.group_loading {
                     return;
                 }
-                if let Some(group) = &right_ui.selected_group {
-                    if let Some(fetch) = fetch_channels {
+                if let Some(group) = &params.right_ui.selected_group {
+                    if let Some(fetch) = &params.fetch_channels {
                         if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup {
                             group: group.clone(),
                         }) {
-                            right_ui.error = Some(format!("Failed to request group: {}", e));
-                            right_ui.group_loading = false;
+                            params.right_ui.error =
+                                Some(format!("Failed to request group: {}", e));
+                            params.right_ui.group_loading = false;
                         } else {
-                            right_ui.group_loading = true;
-                            right_ui.error = None;
+                            params.right_ui.group_loading = true;
+                            params.right_ui.error = None;
                         }
                     } else {
-                        right_ui.error = Some("Fetch service not available".to_string());
+                        params.right_ui.error =
+                            Some("Fetch service not available".to_string());
                     }
                 } else {
-                    right_ui.error = Some("Please select a group first".to_string());
+                    params.right_ui.error = Some("Please select a group first".to_string());
                 }
             }
             ButtonAction::ClearAll => {
-                for entry in store.items.values_mut() {
+                for entry in params.store.items.values_mut() {
                     if let Some(entity) = entry.entity.take() {
-                        commands.entity(entity).despawn_children();
-                        commands.entity(entity).despawn();
+                        params.commands.entity(entity).despawn_children();
+                        params.commands.entity(entity).despawn();
                     }
                 }
-                store.items.clear();
-                right_ui.error = None;
-                selected.tracking = None;
+                params.store.items.clear();
+                params.right_ui.error = None;
+                params.selected.tracking = None;
             }
             ButtonAction::AddSatellite => {
-                right_ui.pending_add = true;
+                params.right_ui.pending_add = true;
             }
             ButtonAction::StopTracking => {
-                selected.tracking = None;
+                params.selected.tracking = None;
             }
             ButtonAction::TimeScale1x => {
-                sim_time.time_scale = 1.0;
+                params.sim_time.time_scale = 1.0;
             }
             ButtonAction::TimeNow => {
-                sim_time.current_utc = chrono::Utc::now();
-                sim_time.time_scale = 1.0;
+                params.sim_time.current_utc = chrono::Utc::now();
+                params.sim_time.time_scale = 1.0;
             }
         }
     }
 
-    if let Ok(action) = q_sat_action.get(ev.entity) {
+    if let Ok(action) = params.q_sat_action.get(ev.entity) {
         match action.action {
             SatelliteAction::Track => {
-                if selected.tracking == Some(action.norad) {
-                    selected.tracking = None;
+                if params.selected.tracking == Some(action.norad) {
+                    params.selected.tracking = None;
                 } else {
-                    selected.selected = Some(action.norad);
-                    selected.tracking = Some(action.norad);
+                    params.selected.selected = Some(action.norad);
+                    params.selected.tracking = Some(action.norad);
                 }
             }
             SatelliteAction::Remove => {
-                if let Some(entry) = store.items.remove(&action.norad)
+                if let Some(entry) = params.store.items.remove(&action.norad)
                     && let Some(entity) = entry.entity
                 {
-                    commands.entity(entity).despawn_children();
-                    commands.entity(entity).despawn();
+                    params.commands.entity(entity).despawn_children();
+                    params.commands.entity(entity).despawn();
                 }
-                if selected.tracking == Some(action.norad) {
-                    selected.tracking = None;
+                if params.selected.tracking == Some(action.norad) {
+                    params.selected.tracking = None;
                 }
-                if selected.selected == Some(action.norad) {
-                    selected.selected = None;
+                if params.selected.selected == Some(action.norad) {
+                    params.selected.selected = None;
                 }
             }
         }
     }
 
-    if let Ok(toggle) = q_panel_toggle.get(ev.entity) {
+    if let Ok(toggle) = params.q_panel_toggle.get(ev.entity) {
         match toggle.kind {
-            PanelToggleKind::Left => ui_state.show_left_panel = !ui_state.show_left_panel,
-            PanelToggleKind::Right => ui_state.show_right_panel = !ui_state.show_right_panel,
-            PanelToggleKind::Top => ui_state.show_top_panel = !ui_state.show_top_panel,
-            PanelToggleKind::Bottom => ui_state.show_bottom_panel = !ui_state.show_bottom_panel,
+            PanelToggleKind::Left => {
+                params.ui_state.show_left_panel = !params.ui_state.show_left_panel;
+            }
+            PanelToggleKind::Right => {
+                params.ui_state.show_right_panel = !params.ui_state.show_right_panel;
+            }
+            PanelToggleKind::Top => {
+                params.ui_state.show_top_panel = !params.ui_state.show_top_panel;
+            }
+            PanelToggleKind::Bottom => {
+                params.ui_state.show_bottom_panel = !params.ui_state.show_bottom_panel;
+            }
         }
     }
 }
@@ -2884,50 +2944,41 @@ fn handle_section_toggle(
     }
 }
 
-fn handle_checkbox_change(
-    ev: On<ValueChange<bool>>,
-    q_binding: Query<&CheckboxBinding>,
-    q_sat_toggle: Query<&SatelliteToggle>,
-    mut arrows: ResMut<ArrowConfig>,
-    mut ui_state: ResMut<UIState>,
-    mut config_bundle: ResMut<UiConfigBundle>,
-    mut heatmap_cfg: ResMut<HeatmapConfig>,
-    mut store: ResMut<SatelliteStore>,
-) {
-    if let Ok(binding) = q_binding.get(ev.source) {
+fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeParams<'_, '_>) {
+    if let Ok(binding) = params.q_binding.get(ev.source) {
         match binding {
-            CheckboxBinding::ShowAxes => ui_state.show_axes = ev.value,
-            CheckboxBinding::ShowArrows => arrows.enabled = ev.value,
-            CheckboxBinding::ArrowGradient => arrows.gradient_enabled = ev.value,
-            CheckboxBinding::ArrowGradientLog => arrows.gradient_log_scale = ev.value,
+            CheckboxBinding::ShowAxes => params.ui_state.show_axes = ev.value,
+            CheckboxBinding::ShowArrows => params.arrows.enabled = ev.value,
+            CheckboxBinding::ArrowGradient => params.arrows.gradient_enabled = ev.value,
+            CheckboxBinding::ArrowGradientLog => params.arrows.gradient_log_scale = ev.value,
             CheckboxBinding::GroundTracksEnabled => {
-                config_bundle.ground_track_cfg.enabled = ev.value
+                params.config_bundle.ground_track_cfg.enabled = ev.value
             }
-            CheckboxBinding::GizmoEnabled => config_bundle.gizmo_cfg.enabled = ev.value,
+            CheckboxBinding::GizmoEnabled => params.config_bundle.gizmo_cfg.enabled = ev.value,
             CheckboxBinding::GizmoShowCenterDot => {
-                config_bundle.gizmo_cfg.show_center_dot = ev.value
+                params.config_bundle.gizmo_cfg.show_center_dot = ev.value
             }
             CheckboxBinding::TrailsAll => {
-                for entry in store.items.values_mut() {
+                for entry in params.store.items.values_mut() {
                     if entry.propagator.is_some() {
                         entry.show_trail = ev.value;
                     }
                 }
             }
             CheckboxBinding::TracksAll => {
-                for entry in store.items.values_mut() {
+                for entry in params.store.items.values_mut() {
                     if entry.propagator.is_some() {
                         entry.show_ground_track = ev.value;
                     }
                 }
             }
-            CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled = ev.value,
+            CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled = ev.value,
         }
         return;
     }
 
-    if let Ok(toggle) = q_sat_toggle.get(ev.source)
-        && let Some(entry) = store.items.get_mut(&toggle.norad)
+    if let Ok(toggle) = params.q_sat_toggle.get(ev.source)
+        && let Some(entry) = params.store.items.get_mut(&toggle.norad)
     {
         match toggle.kind {
             SatelliteToggleKind::GroundTrack => entry.show_ground_track = ev.value,
