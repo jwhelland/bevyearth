@@ -6,7 +6,6 @@
 use bevy::prelude::*;
 
 pub mod fetcher;
-pub mod mock_data;
 pub mod parser;
 pub mod systems;
 pub mod types;

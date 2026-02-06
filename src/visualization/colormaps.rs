@@ -88,71 +88,6 @@ fn polynomial_eval(x: f32, coeffs: &[f32]) -> f32 {
     result
 }
 
-/// Alternative simpler turbo colormap using piecewise linear approximation
-#[allow(dead_code)]
-pub fn turbo_colormap_simple(t: f32) -> [f32; 4] {
-    let t = t.clamp(0.0, 1.0);
-
-    let (r, g, b) = if t < 0.25 {
-        // Dark blue to cyan (0.0 to 0.25)
-        let s = t / 0.25;
-        (0.0, s * 0.8, 1.0)
-    } else if t < 0.5 {
-        // Cyan to green (0.25 to 0.5)
-        let s = (t - 0.25) / 0.25;
-        (0.0, 1.0, 1.0 - s)
-    } else if t < 0.75 {
-        // Green to yellow (0.5 to 0.75)
-        let s = (t - 0.5) / 0.25;
-        (s, 1.0, 0.0)
-    } else {
-        // Yellow to red (0.75 to 1.0)
-        let s = (t - 0.75) / 0.25;
-        (1.0, 1.0 - s, 0.0)
-    };
-
-    [r, g, b, 1.0]
-}
-
-/// Map array of counts to normalized colors with specified range mode
-#[allow(dead_code)]
-pub fn map_counts_to_colors(
-    counts: &[u32],
-    range_mode: crate::visualization::heatmap::RangeMode,
-    fixed_max: Option<u32>,
-    alpha: f32,
-) -> Vec<[f32; 4]> {
-    if counts.is_empty() {
-        return Vec::new();
-    }
-
-    // Determine normalization range
-    let (min_count, max_count) = match range_mode {
-        crate::visualization::heatmap::RangeMode::Auto => {
-            let min = *counts.iter().min().unwrap_or(&0);
-            let max = *counts.iter().max().unwrap_or(&1);
-            (min, max.max(1))
-        }
-        crate::visualization::heatmap::RangeMode::Fixed => (0, fixed_max.unwrap_or(20)),
-    };
-
-    // Map each count to color
-    counts
-        .iter()
-        .map(|&count| {
-            let normalized = if max_count > min_count {
-                (count - min_count) as f32 / (max_count - min_count) as f32
-            } else {
-                0.0
-            };
-
-            let mut color = turbo_colormap(normalized.clamp(0.0, 1.0));
-            color[3] = alpha;
-            color
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,24 +128,6 @@ mod tests {
                 + (window[0][2] - window[1][2]).abs();
             // Colors should be different (but this test is quite permissive)
             assert!(diff > 0.01, "Adjacent colors too similar");
-        }
-    }
-
-    #[test]
-    fn test_map_counts_to_colors() {
-        let counts = vec![0, 5, 10, 15, 20];
-        let colors = map_counts_to_colors(
-            &counts,
-            crate::visualization::heatmap::RangeMode::Auto,
-            None,
-            0.8,
-        );
-
-        assert_eq!(colors.len(), counts.len());
-
-        // Check alpha channel
-        for color in colors {
-            assert_eq!(color[3], 0.8);
         }
     }
 }

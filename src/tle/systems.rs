@@ -30,12 +30,7 @@ pub fn process_fetch_results_system(
                     s.error = None;
                     s.name = name.or_else(|| Some(format!("NORAD {}", norad)));
                     let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
-                    s.tle = Some(TleData {
-                        name: s.name.clone(),
-                        line1: line1.clone(),
-                        line2: line2.clone(),
-                        epoch_utc: epoch,
-                    });
+                    s.tle = Some(TleData { epoch_utc: epoch });
                     // Build SGP4 model (sgp4 2.3.0): parse TLE -> Elements -> Constants
                     match sgp4::Elements::from_tle(
                         s.name.clone(),
@@ -82,16 +77,10 @@ pub fn process_fetch_results_system(
                     .ok()
                     .and_then(|elements| sgp4::Constants::from_elements(&elements).ok());
                     let entry = SatEntry {
-                        norad,
                         name: name_val.clone(),
                         color,
                         entity: None,
-                        tle: Some(TleData {
-                            name: name_val,
-                            line1: line1.clone(),
-                            line2: line2.clone(),
-                            epoch_utc: epoch,
-                        }),
+                        tle: Some(TleData { epoch_utc: epoch }),
                         propagator,
                         error: None,
                         show_ground_track: false,

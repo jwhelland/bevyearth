@@ -203,19 +203,3 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
         "Weather",
     ),
 ];
-
-/// Get display name for a group
-#[allow(dead_code)]
-pub fn get_group_display_name(group: &str) -> &str {
-    SATELLITE_GROUPS
-        .iter()
-        .find(|(key, _)| *key == group)
-        .map(|(_, name)| *name)
-        .unwrap_or(group)
-}
-
-/// Get all group keys
-#[allow(dead_code)]
-pub fn get_all_groups() -> Vec<&'static str> {
-    SATELLITE_GROUPS.iter().map(|(key, _)| *key).collect()
-}

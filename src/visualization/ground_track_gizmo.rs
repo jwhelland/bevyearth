@@ -53,9 +53,7 @@ fn manage_ground_track_gizmo_components_system(
 
             if should_show && !has_gizmo_component {
                 // Add GroundTrackGizmo component
-                commands
-                    .entity(entity)
-                    .insert(GroundTrackGizmo::new(entry.norad));
+                commands.entity(entity).insert(GroundTrackGizmo::new());
             } else if !should_show && has_gizmo_component {
                 // Remove GroundTrackGizmo component
                 commands.entity(entity).remove::<GroundTrackGizmo>();
@@ -67,19 +65,13 @@ fn manage_ground_track_gizmo_components_system(
 /// Component marker for satellites that should show ground track gizmos
 #[derive(Component)]
 pub struct GroundTrackGizmo {
-    /// NORAD ID of the associated satellite
-    #[allow(dead_code)]
-    pub satellite_norad: u32,
     /// Whether to show the ground track
     pub enabled: bool,
 }
 
 impl GroundTrackGizmo {
-    pub fn new(satellite_norad: u32) -> Self {
-        Self {
-            satellite_norad,
-            enabled: true,
-        }
+    pub fn new() -> Self {
+        Self { enabled: true }
     }
 }
 

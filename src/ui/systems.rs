@@ -2263,7 +2263,6 @@ fn process_pending_add(
     store.items.insert(
         norad,
         crate::satellite::SatEntry {
-            norad,
             name: None,
             color,
             entity: None,

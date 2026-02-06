@@ -22,7 +22,6 @@ impl Default for SatelliteStore {
 
 /// Individual satellite entry with all associated data
 pub struct SatEntry {
-    pub norad: u32,
     pub name: Option<String>,
     pub color: Color,
     pub entity: Option<Entity>,

@@ -119,8 +119,8 @@ fn map64((in_min, in_max): (f64, f64), (out_min, out_max): (f64, f64), value: f6
     }
 }
 
-// Maps a value from one range to another (f32 API, f64 math)
-#[allow(dead_code)]
+// Test-only helper for map behavior validation.
+#[cfg(test)]
 fn map((in_min, in_max): (f32, f32), (out_min, out_max): (f32, f32), value: f32) -> f32 {
     map64(
         (in_min as f64, in_max as f64),

@@ -20,8 +20,6 @@ pub fn draw_arrow_segment(
 ) {
     // constants conversion meters->kilometers
     let lift_km = config.lift_m as f64 / 1000.0;
-    let head_min_km = config.head_min_m as f64 / 1000.0;
-    let head_max_km = config.head_max_m as f64 / 1000.0;
     // Direction and lifted city endpoint
     let dir = (sat_ecef_km - city_ecef_km).normalize();
     let city_lifted = city_ecef_km.normalize() * (EARTH_RADIUS_KM as f64 + lift_km);
@@ -58,8 +56,6 @@ pub fn draw_arrow_segment(
     let city_lifted_bevy = ecef_to_bevy_km(city_lifted);
     let shaft_end_bevy = ecef_to_bevy_km(shaft_end);
     gizmos.arrow(city_lifted_bevy, shaft_end_bevy, draw_color);
-
-    let _ = (head_min_km, head_max_km); // reserved for potential arrowhead
 }
 
 /// System to draw arrows from cities to satellites
