@@ -83,6 +83,10 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
         "GPS Operational",
     ),
     (
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=hulianwang&FORMAT=TLE",
+        "Hulianwang Digui",
+    ),
+    (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=intelsat&FORMAT=TLE",
         "Intelsat",
     ),
@@ -97,6 +101,10 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=TLE",
         "Last 30 Days Launches",
+    ),
+    (
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=movers&FORMAT=TLE",
+        "Movers",
     ),
     (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE",
@@ -119,6 +127,10 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
         "OneWeb",
     ),
     (
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=kuiper&FORMAT=TLE",
+        "Kuiper",
+    ),
+    (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=orbcomm&FORMAT=TLE",
         "Orbcomm",
     ),
@@ -129,6 +141,10 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=planet&FORMAT=TLE",
         "Planet Labs",
+    ),
+    (
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=qianfan&FORMAT=TLE",
+        "Qianfan",
     ),
     (
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=radar&FORMAT=TLE",

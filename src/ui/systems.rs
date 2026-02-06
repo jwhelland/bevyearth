@@ -300,63 +300,63 @@ impl Plugin for UiSystemsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HiddenPanelsHintState>()
             .add_systems(
-            Startup,
-            (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                toggle_panels_keyboard,
-                apply_panel_visibility,
-                apply_panel_layout,
-                update_hidden_panels_hint,
-                sync_panel_toggle_buttons,
-                scroll_right_panel_on_wheel,
-                update_time_display,
-                update_status_texts,
-                update_text_input_display,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                process_pending_add,
-                sync_widget_states,
-                sync_slider_visuals,
-                handle_group_loading_text,
-                navigate_focus_with_arrows,
-                // IMPORTANT: this despawns/spawns UI entities; it must run after any system
-                // that might queue commands targeting the current list rows.
-                update_satellite_list,
-                enforce_orbitron_text,
+                Startup,
+                (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
             )
-                .chain(),
-        )
-        // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
-        // and late enough that no later system overwrites our settings before extraction.
-        .add_systems(
-            PostUpdate,
-            (enforce_ui_camera_settings, update_camera_viewport_from_ui)
-                .chain()
-                .after(UiSystems::Layout),
-        )
-        .add_systems(
-            PostUpdate,
-            update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
-        )
-        .add_observer(checkbox_self_update)
-        .add_observer(slider_self_update)
-        .add_observer(handle_button_activate)
-        .add_observer(handle_section_toggle)
-        .add_observer(handle_checkbox_change)
-        .add_observer(handle_slider_change)
-        .add_observer(handle_range_mode_change)
-        .add_observer(text_input_on_click)
-        .add_observer(text_input_on_key_input)
-        .add_observer(handle_group_choice)
-        .add_observer(handle_right_panel_resize_start)
-        .add_observer(handle_right_panel_resize_drag)
-        .add_observer(handle_right_panel_resize_end);
+            .add_systems(
+                Update,
+                (
+                    toggle_panels_keyboard,
+                    apply_panel_visibility,
+                    apply_panel_layout,
+                    update_hidden_panels_hint,
+                    sync_panel_toggle_buttons,
+                    scroll_right_panel_on_wheel,
+                    update_time_display,
+                    update_status_texts,
+                    update_text_input_display,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    process_pending_add,
+                    sync_widget_states,
+                    sync_slider_visuals,
+                    handle_group_loading_text,
+                    navigate_focus_with_arrows,
+                    // IMPORTANT: this despawns/spawns UI entities; it must run after any system
+                    // that might queue commands targeting the current list rows.
+                    update_satellite_list,
+                    enforce_orbitron_text,
+                )
+                    .chain(),
+            )
+            // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
+            // and late enough that no later system overwrites our settings before extraction.
+            .add_systems(
+                PostUpdate,
+                (enforce_ui_camera_settings, update_camera_viewport_from_ui)
+                    .chain()
+                    .after(UiSystems::Layout),
+            )
+            .add_systems(
+                PostUpdate,
+                update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
+            )
+            .add_observer(checkbox_self_update)
+            .add_observer(slider_self_update)
+            .add_observer(handle_button_activate)
+            .add_observer(handle_section_toggle)
+            .add_observer(handle_checkbox_change)
+            .add_observer(handle_slider_change)
+            .add_observer(handle_range_mode_change)
+            .add_observer(text_input_on_click)
+            .add_observer(text_input_on_key_input)
+            .add_observer(handle_group_choice)
+            .add_observer(handle_right_panel_resize_start)
+            .add_observer(handle_right_panel_resize_drag)
+            .add_observer(handle_right_panel_resize_end);
     }
 }
 
