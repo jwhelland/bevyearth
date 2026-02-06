@@ -25,6 +25,7 @@ use bevy::dev_tools::fps_overlay::FpsOverlayPlugin;
 mod core;
 mod orbital;
 mod satellite;
+mod space_weather;
 mod tle;
 mod ui;
 mod visualization;
@@ -32,6 +33,7 @@ mod visualization;
 // Import plugins
 use orbital::OrbitalPlugin;
 use satellite::SatellitePlugin;
+use space_weather::SpaceWeatherPlugin;
 use tle::TlePlugin;
 use ui::{MainCamera, SkyboxPlugin, UiPlugin, skybox::Cubemap};
 use visualization::{
@@ -396,6 +398,7 @@ fn main() {
         app.add_plugins(OrbitalPlugin);
         app.add_plugins(SatellitePlugin);
         app.add_plugins(TlePlugin);
+        app.add_plugins(SpaceWeatherPlugin);
         app.add_plugins(UiPlugin);
         app.add_plugins(SkyboxPlugin);
         app.add_plugins(VisualizationPlugin);

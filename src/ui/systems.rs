@@ -30,10 +30,15 @@ use bevy_ui_widgets::{
     Activate, Slider, SliderPrecision, SliderRange, SliderStep, SliderValue, ValueChange,
     checkbox_self_update, slider_self_update,
 };
+use chrono::{DateTime, Utc};
 use std::time::{Duration, Instant};
 
+use crate::orbital::time::SimulationTime;
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
+};
+use crate::space_weather::{
+    AuroraGrid, KpIndex, SolarWind, SpaceWeatherConfig, SpaceWeatherState,
 };
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
@@ -134,6 +139,24 @@ struct GroupLoadingText;
 struct TrackingStatusText;
 
 #[derive(Component)]
+struct SpaceWeatherKpText;
+
+#[derive(Component)]
+struct SpaceWeatherMagText;
+
+#[derive(Component)]
+struct SpaceWeatherPlasmaText;
+
+#[derive(Component)]
+struct SpaceWeatherUpdatedText;
+
+#[derive(Component)]
+struct SpaceWeatherErrorText;
+
+#[derive(Component)]
+struct AuroraStatusText;
+
+#[derive(Component)]
 struct TextInputField;
 
 #[derive(Component)]
@@ -154,6 +177,7 @@ enum CheckboxBinding {
     TrailsAll,
     TracksAll,
     HeatmapEnabled,
+    AuroraOverlay,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -170,6 +194,9 @@ enum SliderBinding {
     HeatmapFixedMax,
     HeatmapChunkSize,
     HeatmapChunksPerFrame,
+    AuroraIntensity,
+    AuroraAlpha,
+    AuroraLongitudeOffset,
     SatelliteSphereRadius,
     SatelliteEmissiveIntensity,
     TrackingDistance,
@@ -314,6 +341,7 @@ impl Plugin for UiSystemsPlugin {
                     scroll_right_panel_on_wheel,
                     update_time_display,
                     update_status_texts,
+                    update_space_weather_texts,
                     update_text_input_display,
                 ),
             )
@@ -435,6 +463,7 @@ fn setup_ui(
     arrows: Res<ArrowConfig>,
     config_bundle: Res<UiConfigBundle>,
     heatmap_cfg: Res<HeatmapConfig>,
+    space_weather_cfg: Res<SpaceWeatherConfig>,
     selected: Res<SelectedSatellite>,
     sim_time: Res<crate::orbital::SimulationTime>,
 ) {
@@ -593,65 +622,158 @@ fn setup_ui(
 
     // Left panel contents
     commands.entity(left_panel).with_children(|parent| {
-        parent.spawn((bevy::ui::widget::Text::new("City → Sat Vis"), ThemedText));
-
-        parent.spawn((checkbox(
-            (
-                CheckboxBinding::ShowArrows,
-                AutoDirectionalNavigation::default(),
-            ),
-            Spawn((bevy::ui::widget::Text::new("Show arrows"), ThemedText)),
-        ),));
-
-        parent.spawn((checkbox(
-            (
-                CheckboxBinding::ArrowGradient,
-                AutoDirectionalNavigation::default(),
-            ),
-            Spawn((
-                bevy::ui::widget::Text::new("Distance color gradient"),
-                ThemedText,
-            )),
-        ),));
-
-        parent.spawn((checkbox(
-            (
-                CheckboxBinding::ArrowGradientLog,
-                AutoDirectionalNavigation::default(),
-            ),
-            Spawn((bevy::ui::widget::Text::new("Log scale"), ThemedText)),
-        ),));
-
         parent.spawn((
-            bevy::ui::widget::Text::new("Gradient range (km)"),
+            bevy::ui::widget::Text::new("Space Weather"),
             ThemedText,
+            TextFont {
+                font_size: 15.0,
+                ..default()
+            },
+            TextColor(PANEL_TEXT_ACCENT),
+            UiFontBold,
         ));
-        spawn_labeled_slider(
-            parent,
-            "Near",
-            SliderBinding::GradientNear,
-            10.0,
-            200000.0,
-            arrows.gradient_near_km,
-            1000.0,
-        );
-        spawn_labeled_slider(
-            parent,
-            "Far",
-            SliderBinding::GradientFar,
-            10.0,
-            200000.0,
-            arrows.gradient_far_km,
-            1000.0,
-        );
 
-        parent.spawn((checkbox(
-            (
-                CheckboxBinding::ShowAxes,
-                AutoDirectionalNavigation::default(),
-            ),
-            Spawn((bevy::ui::widget::Text::new("Show axes"), ThemedText)),
-        ),));
+        spawn_section(parent, "Overview", true, |section| {
+            section.spawn((
+                SpaceWeatherKpText,
+                bevy::ui::widget::Text::new("Kp: --"),
+                ThemedText,
+            ));
+            section.spawn((
+                SpaceWeatherMagText,
+                bevy::ui::widget::Text::new("Bz: -- nT  Bt: -- nT"),
+                ThemedText,
+            ));
+            section.spawn((
+                SpaceWeatherPlasmaText,
+                bevy::ui::widget::Text::new("Vsw: -- km/s  n: -- cm^-3"),
+                ThemedText,
+            ));
+            section.spawn((
+                SpaceWeatherUpdatedText,
+                bevy::ui::widget::Text::new("Updated: --"),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.6, 0.7, 0.8, 0.85)),
+            ));
+
+            section.spawn((checkbox(
+                (
+                    CheckboxBinding::AuroraOverlay,
+                    AutoDirectionalNavigation::default(),
+                ),
+                Spawn((bevy::ui::widget::Text::new("Aurora overlay"), ThemedText)),
+            ),));
+
+            section.spawn((
+                AuroraStatusText,
+                bevy::ui::widget::Text::new(""),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.8, 0.8, 0.4, 0.85)),
+            ));
+
+            spawn_labeled_slider(
+                section,
+                "Intensity",
+                SliderBinding::AuroraIntensity,
+                0.1,
+                3.0,
+                space_weather_cfg.aurora_intensity_scale,
+                0.1,
+            );
+            spawn_labeled_slider(
+                section,
+                "Alpha",
+                SliderBinding::AuroraAlpha,
+                0.0,
+                1.0,
+                space_weather_cfg.aurora_alpha,
+                0.05,
+            );
+            spawn_labeled_slider(
+                section,
+                "Longitude offset",
+                SliderBinding::AuroraLongitudeOffset,
+                -180.0,
+                180.0,
+                space_weather_cfg.aurora_longitude_offset,
+                5.0,
+            );
+
+            section.spawn((
+                SpaceWeatherErrorText,
+                bevy::ui::widget::Text::new(""),
+                ThemedText,
+                TextColor(Color::srgb(1.0, 0.35, 0.35)),
+            ));
+        });
+
+        spawn_section(parent, "City → Sat Vis", true, |section| {
+            section.spawn((checkbox(
+                (
+                    CheckboxBinding::ShowArrows,
+                    AutoDirectionalNavigation::default(),
+                ),
+                Spawn((bevy::ui::widget::Text::new("Show arrows"), ThemedText)),
+            ),));
+
+            section.spawn((checkbox(
+                (
+                    CheckboxBinding::ArrowGradient,
+                    AutoDirectionalNavigation::default(),
+                ),
+                Spawn((
+                    bevy::ui::widget::Text::new("Distance color gradient"),
+                    ThemedText,
+                )),
+            ),));
+
+            section.spawn((checkbox(
+                (
+                    CheckboxBinding::ArrowGradientLog,
+                    AutoDirectionalNavigation::default(),
+                ),
+                Spawn((bevy::ui::widget::Text::new("Log scale"), ThemedText)),
+            ),));
+
+            section.spawn((
+                bevy::ui::widget::Text::new("Gradient range (km)"),
+                ThemedText,
+            ));
+            spawn_labeled_slider(
+                section,
+                "Near",
+                SliderBinding::GradientNear,
+                10.0,
+                200000.0,
+                arrows.gradient_near_km,
+                1000.0,
+            );
+            spawn_labeled_slider(
+                section,
+                "Far",
+                SliderBinding::GradientFar,
+                10.0,
+                200000.0,
+                arrows.gradient_far_km,
+                1000.0,
+            );
+
+            section.spawn((checkbox(
+                (
+                    CheckboxBinding::ShowAxes,
+                    AutoDirectionalNavigation::default(),
+                ),
+                Spawn((bevy::ui::widget::Text::new("Show axes"), ThemedText)),
+            ),));
+        });
     });
 
     // Right panel contents
@@ -2164,6 +2286,120 @@ fn update_status_texts(
     }
 }
 
+fn update_space_weather_texts(
+    kp: Res<KpIndex>,
+    solar_wind: Res<SolarWind>,
+    aurora: Res<AuroraGrid>,
+    state: Res<SpaceWeatherState>,
+    sim_time: Res<SimulationTime>,
+    mut texts: ParamSet<(
+        Query<&mut bevy::ui::widget::Text, With<SpaceWeatherKpText>>,
+        Query<&mut bevy::ui::widget::Text, With<SpaceWeatherMagText>>,
+        Query<&mut bevy::ui::widget::Text, With<SpaceWeatherPlasmaText>>,
+        Query<&mut bevy::ui::widget::Text, With<SpaceWeatherUpdatedText>>,
+        Query<&mut bevy::ui::widget::Text, With<SpaceWeatherErrorText>>,
+        Query<(&mut bevy::ui::widget::Text, &mut TextColor), With<AuroraStatusText>>,
+    )>,
+) {
+    if !kp.is_changed()
+        && !solar_wind.is_changed()
+        && !aurora.is_changed()
+        && !state.is_changed()
+        && !sim_time.is_changed()
+    {
+        return;
+    }
+
+    for mut text in texts.p0().iter_mut() {
+        text.0 = match (kp.value, kp.timestamp.clone()) {
+            (Some(value), timestamp) => {
+                let time = format_time(timestamp);
+                format!("Kp: {:.1} ({})", value, time)
+            }
+            _ => "Kp: --".to_string(),
+        };
+    }
+
+    for mut text in texts.p1().iter_mut() {
+        let bz = solar_wind
+            .bz
+            .map(|v| format!("{:+.1}", v))
+            .unwrap_or_else(|| "--".to_string());
+        let bt = solar_wind
+            .bt
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "--".to_string());
+        text.0 = format!("Bz: {} nT  Bt: {} nT", bz, bt);
+    }
+
+    for mut text in texts.p2().iter_mut() {
+        let speed = solar_wind
+            .speed
+            .map(|v| format!("{:.0}", v))
+            .unwrap_or_else(|| "--".to_string());
+        let density = solar_wind
+            .density
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "--".to_string());
+        text.0 = format!("Vsw: {} km/s  n: {} cm^-3", speed, density);
+    }
+
+    for mut text in texts.p3().iter_mut() {
+        let updated = latest_time([
+            kp.timestamp.clone(),
+            solar_wind.timestamp.clone(),
+            aurora.updated_utc.clone(),
+        ]);
+        text.0 = format!("Updated: {}", format_time(updated));
+    }
+
+    for mut text in texts.p4().iter_mut() {
+        let err = state
+            .ovation_error
+            .as_deref()
+            .or(state.kp_error.as_deref())
+            .or(state.mag_error.as_deref())
+            .or(state.plasma_error.as_deref());
+        text.0 = err
+            .map(|e| format!("Data error: {}", e))
+            .unwrap_or_default();
+    }
+
+    for (mut text, mut color) in texts.p5().iter_mut() {
+        if let Some(forecast_time) = aurora.updated_utc {
+            let age = sim_time.current_utc.signed_duration_since(forecast_time);
+            let age_mins = age.num_minutes();
+
+            if age_mins < 0 {
+                // Simulation time is behind forecast time
+                text.0 = format!("Forecast: {} min ahead", -age_mins);
+                color.0 = Color::srgba(0.5, 0.8, 1.0, 0.85);
+            } else if age_mins > 60 {
+                text.0 = "⚠ Forecast expired".to_string();
+                color.0 = Color::srgba(1.0, 0.6, 0.0, 0.95);
+            } else if age_mins > 45 {
+                text.0 = "⚠ Forecast expiring soon".to_string();
+                color.0 = Color::srgba(1.0, 0.9, 0.3, 0.9);
+            } else {
+                text.0 = format!("Forecast age: {} min", age_mins);
+                color.0 = Color::srgba(0.6, 0.9, 0.6, 0.85);
+            }
+        } else {
+            text.0.clear();
+        }
+    }
+}
+
+fn format_time(timestamp: Option<DateTime<Utc>>) -> String {
+    timestamp
+        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_else(|| "--".to_string())
+}
+
+fn latest_time(times: [Option<DateTime<Utc>>; 3]) -> Option<DateTime<Utc>> {
+    times.into_iter().flatten().max()
+}
+
 fn handle_group_loading_text(
     right_ui: Res<RightPanelUI>,
     mut group_text: Query<&mut bevy::ui::widget::Text, With<GroupLoadingText>>,
@@ -2580,6 +2816,7 @@ fn sync_widget_states(
     arrows: Res<ArrowConfig>,
     config_bundle: Res<UiConfigBundle>,
     heatmap_cfg: Res<HeatmapConfig>,
+    space_weather_cfg: Res<SpaceWeatherConfig>,
     selected: Res<SelectedSatellite>,
     sim_time: Res<crate::orbital::SimulationTime>,
     right_ui: Res<RightPanelUI>,
@@ -2595,6 +2832,7 @@ fn sync_widget_states(
         || arrows.is_changed()
         || config_bundle.is_changed()
         || heatmap_cfg.is_changed()
+        || space_weather_cfg.is_changed()
         || store.is_changed()
         || selected.is_changed()
         || sim_time.is_changed()
@@ -2626,6 +2864,7 @@ fn sync_widget_states(
                             .all(|s| s.show_ground_track)
                 }
                 CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled,
+                CheckboxBinding::AuroraOverlay => space_weather_cfg.aurora_enabled,
             };
 
             match (should_check, checked.is_some()) {
@@ -2686,6 +2925,9 @@ fn sync_widget_states(
                 SliderBinding::HeatmapFixedMax => heatmap_cfg.fixed_max.unwrap_or(20) as f32,
                 SliderBinding::HeatmapChunkSize => heatmap_cfg.chunk_size as f32,
                 SliderBinding::HeatmapChunksPerFrame => heatmap_cfg.chunks_per_frame as f32,
+                SliderBinding::AuroraIntensity => space_weather_cfg.aurora_intensity_scale,
+                SliderBinding::AuroraAlpha => space_weather_cfg.aurora_alpha,
+                SliderBinding::AuroraLongitudeOffset => space_weather_cfg.aurora_longitude_offset,
                 SliderBinding::SatelliteSphereRadius => config_bundle.render_cfg.sphere_radius,
                 SliderBinding::SatelliteEmissiveIntensity => {
                     config_bundle.render_cfg.emissive_intensity
@@ -2892,6 +3134,7 @@ fn handle_checkbox_change(
     mut ui_state: ResMut<UIState>,
     mut config_bundle: ResMut<UiConfigBundle>,
     mut heatmap_cfg: ResMut<HeatmapConfig>,
+    mut space_weather_cfg: ResMut<SpaceWeatherConfig>,
     mut store: ResMut<SatelliteStore>,
 ) {
     if let Ok(binding) = q_binding.get(ev.source) {
@@ -2922,6 +3165,7 @@ fn handle_checkbox_change(
                 }
             }
             CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled = ev.value,
+            CheckboxBinding::AuroraOverlay => space_weather_cfg.aurora_enabled = ev.value,
         }
         return;
     }
@@ -2942,6 +3186,7 @@ fn handle_slider_change(
     mut arrows: ResMut<ArrowConfig>,
     mut config_bundle: ResMut<UiConfigBundle>,
     mut heatmap_cfg: ResMut<HeatmapConfig>,
+    mut space_weather_cfg: ResMut<SpaceWeatherConfig>,
     mut selected: ResMut<SelectedSatellite>,
     mut sim_time: ResMut<crate::orbital::SimulationTime>,
 ) {
@@ -2973,6 +3218,15 @@ fn handle_slider_change(
         }
         SliderBinding::HeatmapChunksPerFrame => {
             heatmap_cfg.chunks_per_frame = ev.value.round().clamp(1.0, 5.0) as usize
+        }
+        SliderBinding::AuroraIntensity => {
+            space_weather_cfg.aurora_intensity_scale = ev.value;
+        }
+        SliderBinding::AuroraAlpha => {
+            space_weather_cfg.aurora_alpha = ev.value;
+        }
+        SliderBinding::AuroraLongitudeOffset => {
+            space_weather_cfg.aurora_longitude_offset = ev.value;
         }
         SliderBinding::SatelliteSphereRadius => config_bundle.render_cfg.sphere_radius = ev.value,
         SliderBinding::SatelliteEmissiveIntensity => {
