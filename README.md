@@ -1,15 +1,15 @@
 # BevyEarth
 
-An interactive 3D Earth visualization that displays current satellite tracks and into the future.
+An interactive 3D Earth visualization that tracks satellites in real time with a sleek, customizable UI.
 
 <img src="./assets/bevyearth.png" width="100%"/>
 
 ## What is BevyEarth?
 
-BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from satellite tracking database [CelesTrak](https://celestrak.org), you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model.  Try loading all the [Starlink](https://www.starlink.com) satellites for some real fun!
+BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from the [CelesTrak](https://celestrak.org) satellite database, you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model. Try loading all the [Starlink](https://www.starlink.com) satellites for some real fun!
 
 ## Why
-This is a toy project to help me learn bevy and rust, along with a good dose of AI pair programming (thank you Claude, Gemini, Grok and others).  
+This is a toy project to help me learn Bevy and Rust, along with a good dose of AI pair programming (thank you Anthropic, Google, xAi and OpenAI).
 
 **What a world we live in!**
 
@@ -20,16 +20,17 @@ This is a toy project to help me learn bevy and rust, along with a good dose of 
 - **Interactive 3D Earth**: Navigate around a detailed Earth model with realistic textures
 - **Satellite Groups**: Browse and select different types of satellites (weather, communication, scientific, etc.)
 - **City Visualization**: See major cities marked on the Earth's surface
-- **Satellite Earth Trackss**: Visualize satellite tracks on the Earth
+- **Ground Tracks & Trails**: Visualize satellite ground tracks and orbit trails
 - **Time Controls**: Speed up or slow down time to see orbital patterns
 - **Satellite Management**: Add, remove, and organize satellites in your view
+- **Polished UI**: Resizable panels, top bar quick actions, and a cohesive theme
 
 ## Getting Started
 
 1. Install Rust from [rustup.rs](https://rustup.rs/)
 2. Clone this repository
 3. Run `cargo run` to start the application
-4. Use mouse to navigate around Earth and the UI panel to manage satellites
+4. Use the mouse to navigate around Earth and the UI panel to manage satellites
 
 ## Docs
 
@@ -38,13 +39,15 @@ This is a toy project to help me learn bevy and rust, along with a good dose of 
 ## Controls
 
 - **Mouse**: Rotate and zoom around Earth
-- **UI Panel**: Select satellite groups, manage individual satellites, and control visualization options
+- **Top Bar**: Time controls, quick panel toggles, and camera shortcuts
+- **Left/Right Panels**: Manage satellite groups, individual satellites, and visualization options
 - **Satellite Tracking**: Click any satellite's NORAD ID to start camera tracking
 - **Keyboard Shortcuts**:
-  - `H`: Toggle left panel
+  - `H`: Toggle left panel (visualization)
   - `J`: Toggle right panel (satellite controls)
   - `K`: Toggle top panel
-  - `L`: Toggle bottom panel
+  - `L`: Toggle bottom panel (status)
+  - `V`: Toggle 3D viewport cropping
 
 ## Satellite Camera Tracking
 

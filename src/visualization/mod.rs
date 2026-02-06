@@ -14,6 +14,8 @@ pub mod earth;
 pub mod ground_track;
 pub mod ground_track_gizmo;
 pub mod heatmap;
+pub mod lighting;
+pub mod sky_material;
 
 pub use arrows::draw_city_to_satellite_arrows;
 pub use axes::{ShowAxes, draw_axes};
@@ -23,6 +25,8 @@ pub use earth::EarthPlugin;
 pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
 pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
 pub use heatmap::{HeatmapConfig, HeatmapPlugin, RangeMode};
+pub use lighting::SunLight;
+pub use sky_material::SkyMaterialPlugin;
 
 /// Plugin for visualization systems
 pub struct VisualizationPlugin;
@@ -30,6 +34,14 @@ pub struct VisualizationPlugin;
 impl Plugin for VisualizationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ArrowConfig>()
-            .add_systems(Update, (draw_axes, draw_city_to_satellite_arrows));
+            .add_systems(
+                Update,
+                (
+                    draw_axes,
+                    draw_city_to_satellite_arrows,
+                    lighting::update_sun_light_direction,
+                ),
+            )
+            .add_plugins(SkyMaterialPlugin);
     }
 }

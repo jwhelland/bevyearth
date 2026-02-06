@@ -98,3 +98,9 @@ impl Default for SatelliteRenderConfig {
         }
     }
 }
+
+/// Shared render assets for satellites
+#[derive(Resource, Clone)]
+pub struct SatelliteRenderAssets {
+    pub sphere_mesh: Handle<Mesh>,
+}
