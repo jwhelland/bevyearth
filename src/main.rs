@@ -113,7 +113,7 @@ pub fn setup(
 
     commands.spawn((
         DirectionalLight {
-            illuminance: 20_000.0,
+            illuminance: 8_000.0,
             ..default()
         },
         SunDisk::EARTH,
