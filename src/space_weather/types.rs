@@ -20,6 +20,10 @@ pub struct SpaceWeatherConfig {
     pub aurora_texture_width: u32,
     pub aurora_texture_height: u32,
     pub aurora_longitude_offset: f32,
+    pub aurora_noise_strength: f32,
+    pub aurora_noise_speed: f32,
+    pub aurora_lat_start: f32,
+    pub aurora_lat_end: f32,
     pub ovation_refresh: Duration,
     pub kp_refresh: Duration,
     pub solar_wind_refresh: Duration,
@@ -37,6 +41,10 @@ impl Default for SpaceWeatherConfig {
             // Empirically determined (-149° as of 2026) by comparison with NASA SWPC plots.
             // May need adjustment over time as magnetic pole drifts (~50-60 km/year).
             aurora_longitude_offset: -149.0,
+            aurora_noise_strength: 0.4,
+            aurora_noise_speed: 0.002,
+            aurora_lat_start: 45.0,
+            aurora_lat_end: 65.0,
             ovation_refresh: Duration::from_secs(600),
             kp_refresh: Duration::from_secs(900),
             solar_wind_refresh: Duration::from_secs(120),

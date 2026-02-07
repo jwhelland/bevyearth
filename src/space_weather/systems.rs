@@ -8,8 +8,9 @@ use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
 use std::time::Instant;
 
+use crate::core::space::ecef_to_bevy_km;
 use crate::core::coordinates::Coordinates;
-use crate::orbital::time::SimulationTime;
+use crate::orbital::{SimulationTime, SunDirection};
 use crate::space_weather::fetcher::start_space_weather_worker;
 use crate::space_weather::types::{
     AuroraGrid, KpIndex, SolarWind, SpaceWeatherChannels, SpaceWeatherCommand, SpaceWeatherConfig,
@@ -25,6 +26,9 @@ pub(crate) struct AuroraRenderState {
     pub width: u32,
     pub height: u32,
     pub intensity_buffer: Vec<f32>,
+    pub noise_map: Vec<f32>,
+    pub noise_width: usize,
+    pub noise_height: usize,
 }
 
 pub fn setup_space_weather_worker(mut commands: Commands) {
@@ -156,10 +160,12 @@ pub fn initialize_aurora_overlay(
     let image_handle = images.add(image);
 
     let material_handle = materials.add(StandardMaterial {
-        base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
-        base_color_texture: Some(image_handle.clone()),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
+        base_color: Color::BLACK,
+        base_color_texture: None,
+        emissive: LinearRgba::rgb(4.0, 4.0, 4.0),
+        emissive_texture: Some(image_handle.clone()),
+        unlit: false,
+        alpha_mode: AlphaMode::Add,
         cull_mode: None,
         depth_bias: 1.0,
         ..default()
@@ -188,11 +194,16 @@ pub fn initialize_aurora_overlay(
     render_state.width = width;
     render_state.height = height;
     render_state.intensity_buffer = vec![0.0; (width * height) as usize];
+    render_state.noise_width = 128;
+    render_state.noise_height = 64;
+    render_state.noise_map = generate_noise_map(render_state.noise_width, render_state.noise_height);
 }
 
 pub fn update_aurora_texture(
     config: Res<SpaceWeatherConfig>,
     aurora: Res<AuroraGrid>,
+    sun_direction: Res<SunDirection>,
+    time: Res<Time>,
     mut render_state: ResMut<AuroraRenderState>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -223,6 +234,12 @@ pub fn update_aurora_texture(
     }
 
     let max_value = aurora.max_value.max(1.0);
+    let sun_dir = if sun_direction.0.length_squared() > 0.0 {
+        sun_direction.0.normalize()
+    } else {
+        Vec3::Z
+    };
+    let time_s = time.elapsed_secs();
 
     if !aurora.grid_values.is_empty()
         && aurora.grid_width > 0
@@ -234,7 +251,8 @@ pub fn update_aurora_texture(
             let lat = aurora.lat_min + (y as f32 * aurora.lat_step);
             for x in 0..aurora.grid_width {
                 let idx = y * aurora.grid_width + x;
-                let value = aurora.grid_values[idx] * aurora_lat_mask(lat);
+                let lat_mask = aurora_lat_mask(lat, config.aurora_lat_start, config.aurora_lat_end);
+                let mut value = aurora.grid_values[idx] * lat_mask;
                 if value <= 0.0 {
                     continue;
                 }
@@ -251,7 +269,26 @@ pub fn update_aurora_texture(
                 let Ok(coords) = Coordinates::from_degrees(lat, lon) else {
                     continue;
                 };
+                let night_mask = aurora_night_mask(&coords, sun_dir);
+                if night_mask <= 0.0 {
+                    continue;
+                }
                 let (u, v) = coords.convert_to_uv_mercator();
+                let noise = sample_noise(
+                    &render_state.noise_map,
+                    render_state.noise_width,
+                    render_state.noise_height,
+                    u,
+                    v,
+                    time_s,
+                    config.aurora_noise_speed,
+                );
+                let noise_factor = lerp(
+                    1.0 - config.aurora_noise_strength,
+                    1.0 + config.aurora_noise_strength,
+                    noise,
+                );
+                value *= night_mask * noise_factor;
                 let px = (u * (render_state.width as f32 - 1.0))
                     .round()
                     .clamp(0.0, render_state.width as f32 - 1.0) as usize;
@@ -281,6 +318,26 @@ pub fn update_aurora_texture(
                 continue;
             };
             let (u, v) = coords.convert_to_uv_mercator();
+            let lat_mask =
+                aurora_lat_mask(point.lat, config.aurora_lat_start, config.aurora_lat_end);
+            let night_mask = aurora_night_mask(&coords, sun_dir);
+            if lat_mask <= 0.0 || night_mask <= 0.0 {
+                continue;
+            }
+            let noise = sample_noise(
+                &render_state.noise_map,
+                render_state.noise_width,
+                render_state.noise_height,
+                u,
+                v,
+                time_s,
+                config.aurora_noise_speed,
+            );
+            let noise_factor = lerp(
+                1.0 - config.aurora_noise_strength,
+                1.0 + config.aurora_noise_strength,
+                noise,
+            );
             let x = (u * (render_state.width as f32 - 1.0))
                 .round()
                 .clamp(0.0, render_state.width as f32 - 1.0) as usize;
@@ -288,7 +345,7 @@ pub fn update_aurora_texture(
                 .round()
                 .clamp(0.0, render_state.height as f32 - 1.0) as usize;
             let idx = y * width + x;
-            let value = point.value * aurora_lat_mask(point.lat);
+            let value = point.value * lat_mask * night_mask * noise_factor;
             if value > render_state.intensity_buffer[idx] {
                 render_state.intensity_buffer[idx] = value;
             }
@@ -334,29 +391,33 @@ pub fn update_aurora_texture(
         data.resize(data_len, 0);
     }
 
-    // Floor: skip aurora values below 10% of max to filter noise
-    let floor = max_value * 0.1;
+    let floor = percentile_cutoff(&render_state.intensity_buffer, 0.8, max_value);
 
     for (i, chunk) in data.chunks_exact_mut(4).enumerate() {
         let raw = render_state.intensity_buffer[i];
-        if raw <= floor {
+        if raw <= floor || max_value <= floor {
             chunk[0] = 0;
             chunk[1] = 0;
             chunk[2] = 0;
             chunk[3] = 0;
             continue;
         }
-        // Normalize, remapping floor..max to 0..1
         let normalized = ((raw - floor) / (max_value - floor)).clamp(0.0, 1.0);
-        let boosted = (normalized * config.aurora_intensity_scale).min(1.0);
-        // Color encodes both hue and natural brightness
-        let color = aurora_color(boosted);
-        // Alpha uniformly scales additive brightness
-        let alpha = config.aurora_alpha;
-        chunk[0] = (color[0] * alpha * 255.0).clamp(0.0, 255.0) as u8;
-        chunk[1] = (color[1] * alpha * 255.0).clamp(0.0, 255.0) as u8;
-        chunk[2] = (color[2] * alpha * 255.0).clamp(0.0, 255.0) as u8;
-        chunk[3] = (alpha * 255.0).clamp(0.0, 255.0) as u8;
+        let scaled = (normalized * config.aurora_intensity_scale).clamp(0.0, 1.0);
+        let shaped = scaled.powf(1.6);
+        let intensity = (shaped * config.aurora_alpha).clamp(0.0, 1.0);
+        if intensity <= 0.0 {
+            chunk[0] = 0;
+            chunk[1] = 0;
+            chunk[2] = 0;
+            chunk[3] = 0;
+            continue;
+        }
+        let color = aurora_color(shaped);
+        chunk[0] = (color[0] * intensity * 255.0).clamp(0.0, 255.0) as u8;
+        chunk[1] = (color[1] * intensity * 255.0).clamp(0.0, 255.0) as u8;
+        chunk[2] = (color[2] * intensity * 255.0).clamp(0.0, 255.0) as u8;
+        chunk[3] = (intensity * 255.0).clamp(0.0, 255.0) as u8;
     }
 
     // Workaround for Bevy runtime-created asset change detection (bevyengine/bevy#17220):
@@ -414,8 +475,8 @@ fn update_timestamp(current: &mut Option<DateTime<Utc>>, incoming: Option<DateTi
 
 fn aurora_color(t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    // Dim green → bright green → bright magenta
-    let (start, mid, end) = ([0.05, 0.35, 0.12], [0.2, 1.0, 0.4], [1.0, 0.5, 0.9]);
+    // Dim green → bright green → red-orange
+    let (start, mid, end) = ([0.05, 0.35, 0.12], [0.2, 1.0, 0.35], [1.0, 0.2, 0.2]);
     if t <= 0.5 {
         let p = t / 0.5;
         lerp_color(start, mid, p)
@@ -433,10 +494,12 @@ fn lerp_color(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     ]
 }
 
-fn aurora_lat_mask(lat: f32) -> f32 {
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn aurora_lat_mask(lat: f32, start: f32, end: f32) -> f32 {
     let abs_lat = lat.abs();
-    let start = 40.0;
-    let end = 60.0;
     if abs_lat <= start {
         0.0
     } else if abs_lat >= end {
@@ -445,6 +508,62 @@ fn aurora_lat_mask(lat: f32) -> f32 {
         let t = ((abs_lat - start) / (end - start)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     }
+}
+
+fn aurora_night_mask(coords: &Coordinates, sun_dir: Vec3) -> f32 {
+    let normal_ecef = coords.get_point_on_sphere_ecef_km_dvec();
+    let normal_bevy = ecef_to_bevy_km(normal_ecef).normalize_or_zero();
+    let dot = normal_bevy.dot(sun_dir);
+    smoothstep(0.1, -0.1, dot)
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn generate_noise_map(width: usize, height: usize) -> Vec<f32> {
+    let mut values = vec![0.0_f32; width * height];
+    let mut state = 0x1234_abcd_u32;
+    for y in 0..height {
+        for x in 0..width {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            let v = (state >> 8) as f32 / 16_777_215.0;
+            values[y * width + x] = v;
+        }
+    }
+    values
+}
+
+fn sample_noise(
+    noise_map: &[f32],
+    width: usize,
+    height: usize,
+    u: f32,
+    v: f32,
+    time_s: f32,
+    speed: f32,
+) -> f32 {
+    if noise_map.is_empty() || width == 0 || height == 0 {
+        return 0.5;
+    }
+    let u = (u + time_s * speed).fract();
+    let v = (v + time_s * speed * 0.6).fract();
+    let x = u * (width as f32 - 1.0);
+    let y = v * (height as f32 - 1.0);
+    let x0 = x.floor() as usize;
+    let y0 = y.floor() as usize;
+    let x1 = (x0 + 1) % width;
+    let y1 = (y0 + 1) % height;
+    let tx = x - x.floor();
+    let ty = y - y.floor();
+    let v00 = noise_map[y0 * width + x0];
+    let v10 = noise_map[y0 * width + x1];
+    let v01 = noise_map[y1 * width + x0];
+    let v11 = noise_map[y1 * width + x1];
+    let a = lerp(v00, v10, tx);
+    let b = lerp(v01, v11, tx);
+    lerp(a, b, ty)
 }
 
 #[allow(dead_code)]
