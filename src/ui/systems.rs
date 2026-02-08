@@ -361,6 +361,7 @@ struct SyncWidgetStateParams<'w, 's> {
     arrows: Res<'w, ArrowConfig>,
     config_bundle: Res<'w, UiConfigBundle>,
     heatmap_cfg: Res<'w, HeatmapConfig>,
+    space_weather_cfg: Res<'w, SpaceWeatherConfig>,
     selected: Res<'w, SelectedSatellite>,
     sim_time: Res<'w, crate::orbital::SimulationTime>,
     right_ui: Res<'w, RightPanelUI>,
@@ -399,6 +400,7 @@ struct CheckboxChangeParams<'w, 's> {
     ui_state: ResMut<'w, UIState>,
     config_bundle: ResMut<'w, UiConfigBundle>,
     heatmap_cfg: ResMut<'w, HeatmapConfig>,
+    space_weather_cfg: ResMut<'w, SpaceWeatherConfig>,
     store: ResMut<'w, SatelliteStore>,
 }
 
@@ -2969,33 +2971,16 @@ fn spawn_satellite_row(
         });
 }
 
-fn sync_widget_states(
-    store: Res<SatelliteStore>,
-    ui_state: Res<UIState>,
-    arrows: Res<ArrowConfig>,
-    config_bundle: Res<UiConfigBundle>,
-    heatmap_cfg: Res<HeatmapConfig>,
-    space_weather_cfg: Res<SpaceWeatherConfig>,
-    selected: Res<SelectedSatellite>,
-    sim_time: Res<crate::orbital::SimulationTime>,
-    right_ui: Res<RightPanelUI>,
-    mut checkboxes: Query<(Entity, &CheckboxBinding, Option<&Checked>)>,
-    mut range_modes: Query<(Entity, &RangeModeBinding, Option<&Checked>)>,
-    mut group_choices: Query<(Entity, &GroupChoice, Option<&Checked>)>,
-    sliders: Query<(Entity, &SliderBinding), With<SliderValue>>,
-    slider_values: Query<&SliderValue>,
-    mut satellite_toggles: Query<(Entity, &SatelliteToggle, Option<&Checked>)>,
-    mut commands: Commands,
-) {
-    if ui_state.is_changed()
-        || arrows.is_changed()
-        || config_bundle.is_changed()
-        || heatmap_cfg.is_changed()
-        || space_weather_cfg.is_changed()
-        || store.is_changed()
-        || selected.is_changed()
-        || sim_time.is_changed()
-        || right_ui.is_changed()
+fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
+    if params.ui_state.is_changed()
+        || params.arrows.is_changed()
+        || params.config_bundle.is_changed()
+        || params.heatmap_cfg.is_changed()
+        || params.space_weather_cfg.is_changed()
+        || params.store.is_changed()
+        || params.selected.is_changed()
+        || params.sim_time.is_changed()
+        || params.right_ui.is_changed()
     {
         for (entity, binding, checked) in params.checkboxes.iter_mut() {
             let should_check = match binding {
@@ -3028,8 +3013,8 @@ fn sync_widget_states(
                             .filter(|s| s.propagator.is_some())
                             .all(|s| s.show_ground_track)
                 }
-                CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled,
-                CheckboxBinding::AuroraOverlay => space_weather_cfg.aurora_enabled,
+                CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled,
+                CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled,
             };
 
             match (should_check, checked.is_some()) {
@@ -3092,15 +3077,14 @@ fn sync_widget_states(
                 SliderBinding::HeatmapFixedMax => {
                     params.heatmap_cfg.fixed_max.unwrap_or(20) as f32
                 }
-                SliderBinding::HeatmapUpdatePeriod => heatmap_cfg.update_period_s,
-                SliderBinding::HeatmapOpacity => heatmap_cfg.color_alpha,
-                SliderBinding::HeatmapFixedMax => heatmap_cfg.fixed_max.unwrap_or(20) as f32,
-                SliderBinding::HeatmapChunkSize => heatmap_cfg.chunk_size as f32,
-                SliderBinding::HeatmapChunksPerFrame => heatmap_cfg.chunks_per_frame as f32,
-                SliderBinding::AuroraIntensity => space_weather_cfg.aurora_intensity_scale,
-                SliderBinding::AuroraAlpha => space_weather_cfg.aurora_alpha,
-                SliderBinding::AuroraLongitudeOffset => space_weather_cfg.aurora_longitude_offset,
-                SliderBinding::SatelliteSphereRadius => config_bundle.render_cfg.sphere_radius,
+                SliderBinding::HeatmapChunkSize => params.heatmap_cfg.chunk_size as f32,
+                SliderBinding::HeatmapChunksPerFrame => params.heatmap_cfg.chunks_per_frame as f32,
+                SliderBinding::AuroraIntensity => params.space_weather_cfg.aurora_intensity_scale,
+                SliderBinding::AuroraAlpha => params.space_weather_cfg.aurora_alpha,
+                SliderBinding::AuroraLongitudeOffset => {
+                    params.space_weather_cfg.aurora_longitude_offset
+                }
+                SliderBinding::SatelliteSphereRadius => params.config_bundle.render_cfg.sphere_radius,
                 SliderBinding::SatelliteEmissiveIntensity => {
                     params.config_bundle.render_cfg.emissive_intensity
                 }
@@ -3287,18 +3271,8 @@ fn handle_section_toggle(
     }
 }
 
-fn handle_checkbox_change(
-    ev: On<ValueChange<bool>>,
-    q_binding: Query<&CheckboxBinding>,
-    q_sat_toggle: Query<&SatelliteToggle>,
-    mut arrows: ResMut<ArrowConfig>,
-    mut ui_state: ResMut<UIState>,
-    mut config_bundle: ResMut<UiConfigBundle>,
-    mut heatmap_cfg: ResMut<HeatmapConfig>,
-    mut space_weather_cfg: ResMut<SpaceWeatherConfig>,
-    mut store: ResMut<SatelliteStore>,
-) {
-    if let Ok(binding) = q_binding.get(ev.source) {
+fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeParams<'_, '_>) {
+    if let Ok(binding) = params.q_binding.get(ev.source) {
         match binding {
             CheckboxBinding::ShowAxes => params.ui_state.show_axes = ev.value,
             CheckboxBinding::ShowArrows => params.arrows.enabled = ev.value,
@@ -3325,8 +3299,8 @@ fn handle_checkbox_change(
                     }
                 }
             }
-            CheckboxBinding::HeatmapEnabled => heatmap_cfg.enabled = ev.value,
-            CheckboxBinding::AuroraOverlay => space_weather_cfg.aurora_enabled = ev.value,
+            CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled = ev.value,
+            CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled = ev.value,
         }
         return;
     }
