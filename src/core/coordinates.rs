@@ -12,17 +12,24 @@ use bevy::math::{DVec3, Vec3};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::f64::consts::PI;
 
-use crate::core::space::{EARTH_RADIUS_KM_F64, bevy_to_ecef_km, ecef_to_bevy_km};
+use crate::core::space::{EARTH_RADIUS_KM_F64, bevy_to_ecef_km};
 
 pub const EARTH_RADIUS_KM: f32 = 6371.0;
 
 // ========================= Geographic coordinates and helpers =========================
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct CoordError {
     pub msg: String,
 }
+
+impl std::fmt::Display for CoordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl std::error::Error for CoordError {}
 
 #[derive(Debug)]
 pub struct Coordinates {
@@ -68,7 +75,6 @@ impl Coordinates {
         (u, v)
     }
 
-    #[allow(dead_code)]
     pub fn from_degrees(latitude: f32, longitude: f32) -> Result<Self, CoordError> {
         if !(-90.0..=90.0).contains(&latitude) {
             return Err(CoordError {
@@ -88,9 +94,9 @@ impl Coordinates {
         })
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_point_on_sphere(&self) -> Vec3 {
-        ecef_to_bevy_km(self.get_point_on_sphere_ecef_km_dvec())
+        crate::core::space::ecef_to_bevy_km(self.get_point_on_sphere_ecef_km_dvec())
     }
 
     pub fn get_point_on_sphere_ecef_km_dvec(&self) -> DVec3 {
@@ -246,7 +252,7 @@ pub fn julian_date_utc(t: DateTime<Utc>) -> f64 {
 
 /// Greenwich Mean Sidereal Time (radians) using IAU 1982/2006 polynomial.
 /// Assumes UT1 ~= UTC (good enough for visualization; allows optional DUT1 later).
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn gmst_rad(t: DateTime<Utc>) -> f64 {
     let jd = julian_date_utc(t);
     let t_cent = (jd - 2451545.0) / 36525.0; // Julian centuries from J2000.0
@@ -276,7 +282,7 @@ pub fn eci_to_ecef_km(eci: DVec3, gmst: f64) -> DVec3 {
 }
 
 /// Greenwich Mean Sidereal Time (radians) allowing explicit DUT1 (UT1-UTC) seconds.
-/// If `dut1_seconds` is 0, this is equivalent to `gmst_rad`.
+/// If `dut1_seconds` is 0, this matches the GMST computed without DUT1.
 pub fn gmst_rad_with_dut1(t: DateTime<Utc>, dut1_seconds: f64) -> f64 {
     let jd_utc = julian_date_utc(t);
     let jd_ut1 = jd_utc + dut1_seconds / 86400.0_f64;

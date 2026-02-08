@@ -17,8 +17,7 @@ use std::thread;
 const OVATION_URL: &str = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
 const KP_URL: &str = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json";
 const MAG_URL: &str = "https://services.swpc.noaa.gov/products/solar-wind/mag-1-day.json";
-const PLASMA_URL: &str =
-    "https://services.swpc.noaa.gov/products/solar-wind/plasma-1-day.json";
+const PLASMA_URL: &str = "https://services.swpc.noaa.gov/products/solar-wind/plasma-1-day.json";
 
 struct JsonTable {
     header: Vec<String>,
@@ -44,28 +43,24 @@ pub fn start_space_weather_worker() -> SpaceWeatherChannels {
                     ),
                     SpaceWeatherCommand::FetchKp => (
                         SpaceWeatherFeed::Kp,
-                        fetch_kp(&client).await.map(|kp| SpaceWeatherResult::Kp { kp }),
+                        fetch_kp(&client)
+                            .await
+                            .map(|kp| SpaceWeatherResult::Kp { kp }),
                     ),
                     SpaceWeatherCommand::FetchMag => (
                         SpaceWeatherFeed::Mag,
-                        fetch_mag(&client)
-                            .await
-                            .map(|(bt, bz, timestamp)| SpaceWeatherResult::Mag {
-                                bt,
-                                bz,
-                                timestamp,
-                            }),
+                        fetch_mag(&client).await.map(|(bt, bz, timestamp)| {
+                            SpaceWeatherResult::Mag { bt, bz, timestamp }
+                        }),
                     ),
                     SpaceWeatherCommand::FetchPlasma => (
                         SpaceWeatherFeed::Plasma,
                         fetch_plasma(&client)
                             .await
-                            .map(|(speed, density, timestamp)| {
-                                SpaceWeatherResult::Plasma {
-                                    speed,
-                                    density,
-                                    timestamp,
-                                }
+                            .map(|(speed, density, timestamp)| SpaceWeatherResult::Plasma {
+                                speed,
+                                density,
+                                timestamp,
                             }),
                     ),
                 };
@@ -185,12 +180,12 @@ async fn fetch_kp(client: &reqwest::Client) -> Result<KpIndex> {
     let body = fetch_body(client, KP_URL).await?;
     let table = parse_json_table(&body)?;
 
-    let kp_idx = find_column(&table.header, &["kp", "kp_index"])
-        .context("kp: missing kp column")?;
+    let kp_idx =
+        find_column(&table.header, &["kp", "kp_index"]).context("kp: missing kp column")?;
     let time_idx = find_column(&table.header, &["time_tag", "timestamp", "time"]);
 
-    let (value, timestamp) = latest_numeric_with_time(&table.rows, kp_idx, time_idx)
-        .context("kp: no valid rows")?;
+    let (value, timestamp) =
+        latest_numeric_with_time(&table.rows, kp_idx, time_idx).context("kp: no valid rows")?;
 
     Ok(KpIndex {
         value: Some(value),
@@ -198,7 +193,9 @@ async fn fetch_kp(client: &reqwest::Client) -> Result<KpIndex> {
     })
 }
 
-async fn fetch_mag(client: &reqwest::Client) -> Result<(Option<f32>, Option<f32>, Option<DateTime<Utc>>)> {
+async fn fetch_mag(
+    client: &reqwest::Client,
+) -> Result<(Option<f32>, Option<f32>, Option<DateTime<Utc>>)> {
     let body = fetch_body(client, MAG_URL).await?;
     let table = parse_json_table(&body)?;
 
@@ -338,7 +335,9 @@ fn parse_array_rows(items: &[Value]) -> Result<JsonTable> {
 
     let mut rows = Vec::new();
     for row_val in items.iter().skip(1) {
-        let Some(arr) = row_val.as_array() else { continue };
+        let Some(arr) = row_val.as_array() else {
+            continue;
+        };
         let row: Vec<String> = arr
             .iter()
             .map(|v| value_to_string(v).unwrap_or_default())
@@ -358,7 +357,9 @@ fn parse_object_rows(items: &[Value]) -> Result<JsonTable> {
 
     let mut rows = Vec::new();
     for row_val in items.iter() {
-        let Some(obj) = row_val.as_object() else { continue };
+        let Some(obj) = row_val.as_object() else {
+            continue;
+        };
         let mut row = Vec::with_capacity(header.len());
         for key in header.iter() {
             let cell = obj.get(key).and_then(value_to_string).unwrap_or_default();
@@ -400,7 +401,7 @@ fn find_column(header: &[String], candidates: &[&str]) -> Option<usize> {
     None
 }
 
-fn get_cell<'a>(row: &'a [String], idx: usize) -> Option<&'a str> {
+fn get_cell(row: &[String], idx: usize) -> Option<&str> {
     row.get(idx)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty() && *s != "null")
@@ -417,23 +418,23 @@ fn collect_candidate_triples(
 ) {
     match value {
         Value::Array(items) => {
-            if items.len() >= 3 {
-                if let (Some(a), Some(b), Some(c)) = (
-                    items.get(0).and_then(|v| v.as_f64()),
+            if items.len() >= 3
+                && let (Some(a), Some(b), Some(c)) = (
+                    items.first().and_then(|v| v.as_f64()),
                     items.get(1).and_then(|v| v.as_f64()),
                     items.get(2).and_then(|v| v.as_f64()),
-                ) {
-                    let a = a as f32;
-                    let b = b as f32;
-                    let c = c as f32;
-                    if is_lon(a) && is_lat(b) {
-                        lonlat.push((a, b, c));
-                    }
-                    if is_lat(a) && is_lon(b) {
-                        latlon.push((a, b, c));
-                    }
-                    return;
+                )
+            {
+                let a = a as f32;
+                let b = b as f32;
+                let c = c as f32;
+                if is_lon(a) && is_lat(b) {
+                    lonlat.push((a, b, c));
                 }
+                if is_lat(a) && is_lon(b) {
+                    latlon.push((a, b, c));
+                }
+                return;
             }
             for item in items {
                 collect_candidate_triples(item, lonlat, latlon);
@@ -560,15 +561,14 @@ fn ovation_timestamp(obj: &serde_json::Map<String, Value>) -> Option<DateTime<Ut
         "timestamp",
         "time",
     ] {
-        if let Some(Value::String(value)) = obj.get(key) {
-            if let Some(ts) = parse_timestamp(value) {
-                return Some(ts);
-            }
+        if let Some(Value::String(value)) = obj.get(key)
+            && let Some(ts) = parse_timestamp(value)
+        {
+            return Some(ts);
         }
     }
     None
 }
-
 
 fn scaled_key(value: f32) -> i32 {
     (value * 1000.0).round() as i32
@@ -700,9 +700,8 @@ fn latest_numeric_with_time(
 ) -> Option<(f32, Option<DateTime<Utc>>)> {
     for row in rows.iter().rev() {
         if let Some(value) = parse_f32(get_cell(row, idx)) {
-            let timestamp = time_idx.and_then(|t_idx| {
-                get_cell(row, t_idx).and_then(|value| parse_timestamp(value))
-            });
+            let timestamp =
+                time_idx.and_then(|t_idx| get_cell(row, t_idx).and_then(parse_timestamp));
             return Some((value, timestamp));
         }
     }
@@ -754,7 +753,8 @@ mod tests {
 
     #[test]
     fn parse_kp_latest() {
-        let body = r#"[["time_tag","kp"],["2024-01-01 00:00:00","1.0"],["2024-01-01 03:00:00","2.67"]]"#;
+        let body =
+            r#"[["time_tag","kp"],["2024-01-01 00:00:00","1.0"],["2024-01-01 03:00:00","2.67"]]"#;
         let table = parse_json_table(body).unwrap();
         let kp_idx = find_column(&table.header, &["kp"]).unwrap();
         let time_idx = find_column(&table.header, &["time_tag"]);

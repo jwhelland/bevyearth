@@ -134,8 +134,12 @@ pub enum SpaceWeatherCommand {
 
 #[derive(Debug)]
 pub enum SpaceWeatherResult {
-    Ovation { grid: AuroraGrid },
-    Kp { kp: KpIndex },
+    Ovation {
+        grid: AuroraGrid,
+    },
+    Kp {
+        kp: KpIndex,
+    },
     Mag {
         bt: Option<f32>,
         bz: Option<f32>,

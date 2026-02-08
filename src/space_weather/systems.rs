@@ -8,13 +8,14 @@ use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
 use std::time::Instant;
 
-use crate::core::space::ecef_to_bevy_km;
 use crate::core::coordinates::Coordinates;
+use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::{SimulationTime, SunDirection};
 use crate::space_weather::fetcher::start_space_weather_worker;
 use crate::space_weather::types::{
-    AuroraGrid, KpIndex, SolarWind, SpaceWeatherChannels, SpaceWeatherCommand, SpaceWeatherConfig,
-    SpaceWeatherFeed, SpaceWeatherResult, SpaceWeatherState, AURORA_FORECAST_VALIDITY,
+    AURORA_FORECAST_VALIDITY, AuroraGrid, KpIndex, SolarWind, SpaceWeatherChannels,
+    SpaceWeatherCommand, SpaceWeatherConfig, SpaceWeatherFeed, SpaceWeatherResult,
+    SpaceWeatherState,
 };
 use crate::visualization::earth::EarthMeshHandle;
 
@@ -83,7 +84,9 @@ pub fn apply_space_weather_results(
         match msg {
             SpaceWeatherResult::Ovation { grid } => {
                 if !*ovation_logged
-                    && (grid.grid_width > 0 || !grid.points.is_empty() || !grid.grid_values.is_empty())
+                    && (grid.grid_width > 0
+                        || !grid.points.is_empty()
+                        || !grid.grid_values.is_empty())
                 {
                     println!(
                         "[OVATION] received grid={}x{} values={} max={:.3}",
@@ -117,14 +120,12 @@ pub fn apply_space_weather_results(
                 update_timestamp(&mut solar_wind.timestamp, timestamp);
                 state.plasma_error = None;
             }
-            SpaceWeatherResult::Error { feed, error } => {
-                match feed {
-                    SpaceWeatherFeed::Ovation => state.ovation_error = Some(error),
-                    SpaceWeatherFeed::Kp => state.kp_error = Some(error),
-                    SpaceWeatherFeed::Mag => state.mag_error = Some(error),
-                    SpaceWeatherFeed::Plasma => state.plasma_error = Some(error),
-                }
-            }
+            SpaceWeatherResult::Error { feed, error } => match feed {
+                SpaceWeatherFeed::Ovation => state.ovation_error = Some(error),
+                SpaceWeatherFeed::Kp => state.kp_error = Some(error),
+                SpaceWeatherFeed::Mag => state.mag_error = Some(error),
+                SpaceWeatherFeed::Plasma => state.plasma_error = Some(error),
+            },
         }
     }
 }
@@ -164,6 +165,9 @@ pub fn initialize_aurora_overlay(
         base_color_texture: None,
         emissive: LinearRgba::rgb(4.0, 4.0, 4.0),
         emissive_texture: Some(image_handle.clone()),
+        metallic: 0.0,
+        perceptual_roughness: 1.0,
+        reflectance: 0.0,
         unlit: false,
         alpha_mode: AlphaMode::Add,
         cull_mode: None,
@@ -196,7 +200,8 @@ pub fn initialize_aurora_overlay(
     render_state.intensity_buffer = vec![0.0; (width * height) as usize];
     render_state.noise_width = 128;
     render_state.noise_height = 64;
-    render_state.noise_map = generate_noise_map(render_state.noise_width, render_state.noise_height);
+    render_state.noise_map =
+        generate_noise_map(render_state.noise_width, render_state.noise_height);
 }
 
 pub fn update_aurora_texture(
@@ -450,7 +455,8 @@ pub fn sync_aurora_visibility(
             false // No timestamp = hide by default
         };
 
-        let should_show = config.aurora_enabled && has_data && config.aurora_alpha > 0.0 && is_valid;
+        let should_show =
+            config.aurora_enabled && has_data && config.aurora_alpha > 0.0 && is_valid;
         *vis = if should_show {
             Visibility::Visible
         } else {
@@ -566,7 +572,6 @@ fn sample_noise(
     lerp(a, b, ty)
 }
 
-#[allow(dead_code)]
 fn percentile_cutoff(values: &[f32], percentile: f32, max_value: f32) -> f32 {
     if values.is_empty() || max_value <= 0.0 {
         return 0.0;
