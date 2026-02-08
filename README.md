@@ -1,12 +1,12 @@
-# BevyEarth
+# Bevy Earth
 
-An interactive 3D Earth visualization that tracks satellites in real time with a sleek, customizable UI.
+An interactive 3D Earth visualization that tracks satellites in real time, shows space weather, and will soon add other layers, all with a sleek retro feel UI.
 
 <img src="./assets/bevyearth.png" width="100%"/>
 
-## What is BevyEarth?
+## What is Bevy Earth?
 
-BevyEarth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from the [CelesTrak](https://celestrak.org) satellite database, you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model. Try loading all the [Starlink](https://www.starlink.com) satellites for some real fun!
+Bevy Earth is an interactive 3D application that lets you explore Earth from space while tracking real satellites as they orbit our planet. Using TLE data from the [CelesTrak](https://celestrak.org) satellite database, you can watch thousands of satellites move in their actual orbits around a beautifully rendered Earth model. Try loading all the Starlink satellites in the Group list for some real fun!
 
 ## Why
 This is a toy project to help me learn Bevy and Rust, along with a good dose of AI pair programming (thank you Anthropic, Google, xAi and OpenAI).

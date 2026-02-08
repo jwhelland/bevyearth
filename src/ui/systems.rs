@@ -105,6 +105,9 @@ pub struct MainCamera;
 struct TimeText;
 
 #[derive(Component)]
+struct TimeScaleValueText;
+
+#[derive(Component)]
 struct HiddenPanelsHintCard;
 
 fn queue_set_checked(commands: &mut Commands, entity: Entity, checked: bool) {
@@ -168,16 +171,15 @@ struct TextInputPlaceholderText;
 struct TooltipBubble;
 
 #[derive(Component)]
-struct TooltipTarget {
+struct TooltipToggle {
     bubble: Entity,
 }
 
 #[derive(Component, Clone, Copy)]
+#[allow(dead_code)]
 enum CheckboxBinding {
     ShowAxes,
     ShowArrows,
-    ArrowGradient,
-    ArrowGradientLog,
     GroundTracksEnabled,
     GizmoEnabled,
     GizmoShowCenterDot,
@@ -189,8 +191,6 @@ enum CheckboxBinding {
 
 #[derive(Component, Clone, Copy)]
 enum SliderBinding {
-    GradientNear,
-    GradientFar,
     GroundTrackRadius,
     GizmoSegments,
     GizmoCenterDotSize,
@@ -223,7 +223,6 @@ enum ButtonAction {
     ClearAll,
     AddSatellite,
     StopTracking,
-    TimeScale1x,
     TimeNow,
 }
 
@@ -275,6 +274,13 @@ struct SectionToggle {
 #[derive(Component)]
 struct UiFontBold;
 
+#[derive(Component)]
+struct SatellitesListSection;
+
+struct SectionEntities {
+    body: Entity,
+}
+
 #[derive(Resource, Clone)]
 struct UiFontHandles {
     medium: Handle<Font>,
@@ -289,6 +295,8 @@ const PANEL_TEXT_ACCENT: Color = Color::srgba(0.4, 1.0, 1.0, 1.0);
 const TOOLTIP_BG: Color = Color::srgba(0.02, 0.08, 0.12, 0.95);
 const TOOLTIP_TEXT: Color = Color::srgba(0.8, 0.9, 1.0, 0.95);
 const TOOLTIP_MAX_WIDTH_PX: f32 = 220.0;
+const TOOLTIP_ICON_BG: Color = Color::srgba(0.08, 0.12, 0.18, 0.9);
+const TOOLTIP_ICON_SIZE_PX: f32 = 14.0;
 const UI_FONT_PATH: &str = "Orbitron-Medium.ttf";
 const UI_FONT_BOLD_PATH: &str = "Orbitron-Bold.ttf";
 const TOP_PANEL_HEIGHT_PX: f32 = 52.0;
@@ -297,6 +305,8 @@ const GRID_LINE: Color = Color::srgba(0.1, 0.6, 0.7, 0.10);
 const GRID_STEPS: [f32; 9] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0];
 const HIDDEN_PANELS_HINT_DURATION: Duration = Duration::from_secs(5);
 const HIDDEN_PANELS_HINT_OFFSET_X_PX: f32 = 320.0;
+const SATELLITE_LIST_NAME_CHAR_PX: f32 = 7.0;
+const SATELLITE_LIST_FIXED_WIDTH_PX: f32 = 316.0;
 
 #[derive(Clone, Copy)]
 enum Edge {
@@ -370,11 +380,7 @@ struct SyncWidgetStateParams<'w, 's> {
     group_choices: Query<'w, 's, (Entity, &'static GroupChoice, Option<&'static Checked>)>,
     sliders: Query<'w, 's, (Entity, &'static SliderBinding), With<SliderValue>>,
     slider_values: Query<'w, 's, &'static SliderValue>,
-    satellite_toggles: Query<
-        'w,
-        's,
-        (Entity, &'static SatelliteToggle, Option<&'static Checked>),
-    >,
+    satellite_toggles: Query<'w, 's, (Entity, &'static SatelliteToggle, Option<&'static Checked>)>,
     commands: Commands<'w, 's>,
 }
 
@@ -421,13 +427,13 @@ impl Plugin for UiSystemsPlugin {
                     apply_panel_visibility,
                     apply_panel_layout,
                     update_hidden_panels_hint,
-                    update_tooltip_visibility,
                     sync_panel_toggle_buttons,
                     scroll_right_panel_on_wheel,
                     update_time_display,
                     update_status_texts,
                     update_space_weather_texts,
                     update_text_input_display,
+                    update_satellite_list_panel_width,
                 ),
             )
             .add_systems(
@@ -466,6 +472,7 @@ impl Plugin for UiSystemsPlugin {
             .add_observer(handle_range_mode_change)
             .add_observer(text_input_on_click)
             .add_observer(text_input_on_key_input)
+            .add_observer(handle_tooltip_toggle_click)
             .add_observer(handle_group_choice)
             .add_observer(handle_right_panel_resize_start)
             .add_observer(handle_right_panel_resize_drag)
@@ -538,7 +545,6 @@ fn enforce_orbitron_text(
 fn setup_ui(
     mut commands: Commands,
     layout: Res<UiLayoutState>,
-    arrows: Res<ArrowConfig>,
     config_bundle: Res<UiConfigBundle>,
     heatmap_cfg: Res<HeatmapConfig>,
     space_weather_cfg: Res<SpaceWeatherConfig>,
@@ -711,7 +717,7 @@ fn setup_ui(
             UiFontBold,
         ));
 
-        spawn_section(parent, "Overview", true, |section| {
+        let _ = spawn_section(parent, "Overview", true, |section| {
             spawn_space_weather_row(
                 section,
                 SpaceWeatherKpText,
@@ -796,63 +802,13 @@ fn setup_ui(
             ));
         });
 
-        spawn_section(parent, "City → Sat Vis", true, |section| {
+        let _ = spawn_section(parent, "City → Sat Vis", false, |section| {
             section.spawn((checkbox(
                 (
                     CheckboxBinding::ShowArrows,
                     AutoDirectionalNavigation::default(),
                 ),
                 Spawn((bevy::ui::widget::Text::new("Show arrows"), ThemedText)),
-            ),));
-
-            section.spawn((checkbox(
-                (
-                    CheckboxBinding::ArrowGradient,
-                    AutoDirectionalNavigation::default(),
-                ),
-                Spawn((
-                    bevy::ui::widget::Text::new("Distance color gradient"),
-                    ThemedText,
-                )),
-            ),));
-
-            section.spawn((checkbox(
-                (
-                    CheckboxBinding::ArrowGradientLog,
-                    AutoDirectionalNavigation::default(),
-                ),
-                Spawn((bevy::ui::widget::Text::new("Log scale"), ThemedText)),
-            ),));
-
-            section.spawn((
-                bevy::ui::widget::Text::new("Gradient range (km)"),
-                ThemedText,
-            ));
-            spawn_labeled_slider(
-                section,
-                "Near",
-                SliderBinding::GradientNear,
-                10.0,
-                200000.0,
-                arrows.gradient_near_km,
-                1000.0,
-            );
-            spawn_labeled_slider(
-                section,
-                "Far",
-                SliderBinding::GradientFar,
-                10.0,
-                200000.0,
-                arrows.gradient_far_km,
-                1000.0,
-            );
-
-            section.spawn((checkbox(
-                (
-                    CheckboxBinding::ShowAxes,
-                    AutoDirectionalNavigation::default(),
-                ),
-                Spawn((bevy::ui::widget::Text::new("Show axes"), ThemedText)),
             ),));
         });
     });
@@ -919,7 +875,7 @@ fn setup_ui(
                             TextColor(PANEL_TEXT_ACCENT),
                             UiFontBold,
                         ));
-                        spawn_section(parent, "Satellite Groups", true, |section| {
+                        let _ = spawn_section(parent, "Satellite Groups", true, |section| {
                             section
                                 .spawn((
                                     Node {
@@ -996,7 +952,7 @@ fn setup_ui(
                             ));
                         });
 
-                        spawn_section(parent, "Add Satellite", false, |section| {
+                        let _ = spawn_section(parent, "Add Satellite", false, |section| {
                             section
                                 .spawn((
                                     Node {
@@ -1046,6 +1002,30 @@ fn setup_ui(
                                     ),));
                                 });
 
+                            section
+                                .spawn((
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(6.0),
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                    ThemedText,
+                                ))
+                                .with_children(|row| {
+                                    spawn_styled_text(
+                                        row,
+                                        "Finding NORAD IDs",
+                                        LabelStyle::normal(11.0),
+                                        (),
+                                    );
+                                    spawn_info_icon_with_tooltip_flow(
+                                        row,
+                                        "Look up NORAD IDs on the CelesTrak satellite lists: https://celestrak.org",
+                                    );
+                                });
+
                             section.spawn((
                                 ErrorText,
                                 bevy::ui::widget::Text::new(""),
@@ -1054,7 +1034,7 @@ fn setup_ui(
                             ));
                         });
 
-                        spawn_section(parent, "Ground Tracks", false, |section| {
+                        let _ = spawn_section(parent, "Ground Tracks", false, |section| {
                             section.spawn((checkbox(
                                 (
                                     CheckboxBinding::TracksAll,
@@ -1121,7 +1101,7 @@ fn setup_ui(
                             );
                         });
 
-                        spawn_section(parent, "Orbit Trails", false, |section| {
+                        let _ = spawn_section(parent, "Orbit Trails", false, |section| {
                             section.spawn((checkbox(
                                 (
                                     CheckboxBinding::TrailsAll,
@@ -1149,7 +1129,7 @@ fn setup_ui(
                             );
                         });
 
-                        spawn_section(parent, "Heatmap", false, |section| {
+                        let _ = spawn_section(parent, "Heatmap", false, |section| {
                             section.spawn((checkbox(
                                 (
                                     CheckboxBinding::HeatmapEnabled,
@@ -1219,7 +1199,7 @@ fn setup_ui(
                             );
                         });
 
-                        spawn_section(parent, "Satellite Rendering", false, |section| {
+                        let _ = spawn_section(parent, "Satellite Rendering", false, |section| {
                             spawn_labeled_slider(
                                 section,
                                 "Sphere size (km)",
@@ -1242,7 +1222,7 @@ fn setup_ui(
 
                         // Atmosphere controls removed for now (feature disabled).
 
-                        spawn_section(parent, "Camera Tracking", false, |section| {
+                        let _ = spawn_section(parent, "Camera Tracking", false, |section| {
                             section.spawn((
                                 TrackingStatusText,
                                 bevy::ui::widget::Text::new("Tracking: None"),
@@ -1276,7 +1256,11 @@ fn setup_ui(
                             );
                         });
 
-                        spawn_section(parent, "Satellites List", false, |section| {
+                        let satellite_list_section = spawn_section(
+                            parent,
+                            "Satellites List",
+                            false,
+                            |section| {
                             // Header Row
                             section
                                 .spawn((
@@ -1396,7 +1380,16 @@ fn setup_ui(
                                     spawn_scrollbar(container, list_entity, 240.0);
                                     satellite_list = list_entity;
                                 });
-                        });
+                            },
+                        );
+                        parent
+                            .commands()
+                            .entity(satellite_list_section.body)
+                            .insert(SatellitesListSection);
+                        parent
+                            .commands()
+                            .entity(satellite_list_section.body)
+                            .insert(SatellitesListSection);
                     })
                     .id();
 
@@ -1587,12 +1580,167 @@ fn spawn_tooltip_bubble(parent: &mut ChildSpawnerCommands, text: &str) -> Entity
         .id()
 }
 
+fn spawn_tooltip_bubble_absolute(parent: &mut ChildSpawnerCommands, text: &str) -> Entity {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(18.0),
+                max_width: Val::Px(TOOLTIP_MAX_WIDTH_PX),
+                padding: UiRect::all(Val::Px(8.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(TOOLTIP_BG),
+            Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+            Pickable::IGNORE,
+            ThemedText,
+            TooltipBubble,
+        ))
+        .with_children(|bubble| {
+            bubble.spawn((
+                bevy::ui::widget::Text::new(text),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(TOOLTIP_TEXT),
+            ));
+        })
+        .id()
+}
+
+fn spawn_info_icon_with_tooltip(parent: &mut ChildSpawnerCommands, tooltip: &str) {
+    let mut icon_entity = Entity::PLACEHOLDER;
+    let container = parent
+        .spawn((
+            Node {
+                position_type: PositionType::Relative,
+                width: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                height: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .id();
+
+    parent
+        .commands()
+        .entity(container)
+        .with_children(|container| {
+            icon_entity = container
+                .spawn((
+                    Node {
+                        width: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                        height: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(TOOLTIP_ICON_SIZE_PX * 0.5)),
+                        ..default()
+                    },
+                    BackgroundColor(TOOLTIP_ICON_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    EntityCursor::System(SystemCursorIcon::Pointer),
+                    Pickable::default(),
+                    ThemedText,
+                ))
+                .with_children(|icon| {
+                    icon.spawn((
+                        bevy::ui::widget::Text::new("i"),
+                        ThemedText,
+                        TextFont {
+                            font_size: 9.0,
+                            ..default()
+                        },
+                        TextColor(TOOLTIP_TEXT),
+                    ));
+                })
+                .id();
+
+            let bubble = spawn_tooltip_bubble_absolute(container, tooltip);
+        container
+            .commands()
+            .entity(icon_entity)
+            .insert(TooltipToggle { bubble });
+    });
+}
+
+fn spawn_info_icon_with_tooltip_flow(parent: &mut ChildSpawnerCommands, tooltip: &str) {
+    let mut icon_entity = Entity::PLACEHOLDER;
+    let container = parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .id();
+
+    parent.commands().entity(container).with_children(|col| {
+        col
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
+            .with_children(|row| {
+                icon_entity = row
+                    .spawn((
+                        Node {
+                            width: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                            height: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(TOOLTIP_ICON_SIZE_PX * 0.5)),
+                            ..default()
+                        },
+                        BackgroundColor(TOOLTIP_ICON_BG),
+                        Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                        EntityCursor::System(SystemCursorIcon::Pointer),
+                        Pickable::default(),
+                        ThemedText,
+                    ))
+                    .with_children(|icon| {
+                        icon.spawn((
+                            bevy::ui::widget::Text::new("i"),
+                            ThemedText,
+                            TextFont {
+                                font_size: 9.0,
+                                ..default()
+                            },
+                            TextColor(TOOLTIP_TEXT),
+                        ));
+                    })
+                    .id();
+            });
+
+        let bubble = spawn_tooltip_bubble(col, tooltip);
+        col.commands()
+            .entity(icon_entity)
+            .insert(TooltipToggle { bubble });
+    });
+}
+
 fn spawn_space_weather_row<B: Bundle>(
     parent: &mut ChildSpawnerCommands,
     marker: B,
     label: &str,
     tooltip: &str,
 ) {
+    let mut icon_entity = Entity::PLACEHOLDER;
     let row_entity = parent
         .spawn((
             Node {
@@ -1608,11 +1756,55 @@ fn spawn_space_weather_row<B: Bundle>(
         .id();
 
     parent.commands().entity(row_entity).with_children(|row| {
-        row.spawn((marker, bevy::ui::widget::Text::new(label), ThemedText));
+        let label_row = row
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
+            .id();
+
+        row.commands().entity(label_row).with_children(|label_row| {
+            label_row.spawn((marker, bevy::ui::widget::Text::new(label), ThemedText));
+            icon_entity = label_row
+                .spawn((
+                    Node {
+                        width: Val::Px(14.0),
+                        height: Val::Px(14.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(7.0)),
+                        ..default()
+                    },
+                    BackgroundColor(TOOLTIP_ICON_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    EntityCursor::System(SystemCursorIcon::Pointer),
+                    Pickable::default(),
+                    ThemedText,
+                ))
+                .with_children(|icon| {
+                    icon.spawn((
+                        bevy::ui::widget::Text::new("i"),
+                        ThemedText,
+                        TextFont {
+                            font_size: 9.0,
+                            ..default()
+                        },
+                        TextColor(TOOLTIP_TEXT),
+                    ));
+                })
+                .id();
+        });
+
         let bubble = spawn_tooltip_bubble(row, tooltip);
         row.commands()
-            .entity(row_entity)
-            .insert(TooltipTarget { bubble });
+            .entity(icon_entity)
+            .insert(TooltipToggle { bubble });
     });
 }
 
@@ -1675,7 +1867,7 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(8.0),
-                width: Val::Px(240.0),
+                width: Val::Px(280.0),
                 flex_grow: 0.0,
                 ..default()
             },
@@ -1683,35 +1875,75 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
             ThemedText,
         ))
         .with_children(|middle| {
-            spawn_labeled_slider_row(
-                middle,
-                LabeledSliderRowProps {
-                    label: "Speed",
-                    label_style: LabelStyle::accent(12.0),
-                    binding: SliderBinding::TimeScale,
-                    min: 1.0,
-                    max: 1000.0,
-                    value: time_scale,
-                    step: 1.0,
-                },
-            );
-            spawn_fixed_button(
-                middle,
-                56.0,
-                ButtonProps::default(),
-                (
-                    ButtonAction::TimeScale1x,
-                    AutoDirectionalNavigation::default(),
-                ),
-                "1x",
-            );
-            spawn_fixed_button(
-                middle,
-                64.0,
-                ButtonProps::default(),
-                (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
-                "Now",
-            );
+            let precision = slider_precision_from_step(1.0);
+            middle
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(PANEL_INNER_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    Pickable::IGNORE,
+                    ThemedText,
+                ))
+                .with_children(|row| {
+                    spawn_styled_text(row, "Speed", LabelStyle::accent(12.0), ());
+                    let slider_entity = row
+                        .spawn(slider(
+                            SliderProps {
+                                value: time_scale,
+                                min: 1.0,
+                                max: 1000.0,
+                            },
+                            (
+                                SliderBinding::TimeScale,
+                                SliderStep(1.0),
+                                SliderPrecision(precision),
+                                AutoDirectionalNavigation::default(),
+                            ),
+                        ))
+                        .id();
+                    row.commands().entity(slider_entity).insert(Node {
+                        width: Val::Px(140.0),
+                        height: Val::Px(18.0),
+                        ..default()
+                    });
+                    spawn_pill_chip(
+                        row,
+                        "1x",
+                        LabelStyle::normal(11.0),
+                        TimeScaleValueText,
+                    );
+                });
+            middle
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                    ThemedText,
+                ))
+                .with_children(|row| {
+                    spawn_fixed_button(
+                        row,
+                        88.0,
+                        ButtonProps::default(),
+                        (ButtonAction::TimeNow, AutoDirectionalNavigation::default()),
+                        "Now",
+                    );
+                    spawn_info_icon_with_tooltip(
+                        row,
+                        "Jumps the simulation clock to the current UTC time.",
+                    );
+                });
         });
 }
 
@@ -1840,7 +2072,9 @@ fn spawn_section(
     title: &str,
     initially_expanded: bool,
     build: impl FnOnce(&mut ChildSpawnerCommands),
-) {
+) -> SectionEntities {
+    let mut body_entity = Entity::PLACEHOLDER;
+
     parent
         .spawn((
             Node {
@@ -1883,7 +2117,7 @@ fn spawn_section(
                 body_node.display = Display::None;
             }
 
-            let body = section
+            body_entity = section
                 .spawn((body_node, Pickable::IGNORE, ThemedText))
                 .with_children(|body| {
                     body.spawn((
@@ -1900,7 +2134,7 @@ fn spawn_section(
                 .id();
 
             section.commands().entity(header_entity).insert((
-                SectionToggle { body },
+                SectionToggle { body: body_entity },
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(28.0),
@@ -1912,6 +2146,8 @@ fn spawn_section(
                 },
             ));
         });
+
+    SectionEntities { body: body_entity }
 }
 
 fn spawn_edge_glow(parent: &mut ChildSpawnerCommands, edge: Edge) {
@@ -2380,28 +2616,51 @@ fn update_camera_input_from_ui_hover(
     }
 }
 
-fn update_tooltip_visibility(
-    mut bubbles: Query<&mut Node, With<TooltipBubble>>,
-    targets: Query<(&RelativeCursorPosition, &TooltipTarget)>,
-) {
-    for (cursor, target) in targets.iter() {
-        let Ok(mut node) = bubbles.get_mut(target.bubble) else {
-            continue;
-        };
-        node.display = if cursor.cursor_over {
-            Display::Flex
-        } else {
-            Display::None
-        };
-    }
-}
-
 fn update_time_display(
-    mut texts: ParamSet<(Query<&mut bevy::ui::widget::Text, With<TimeText>>,)>,
+    mut texts: ParamSet<(
+        Query<&mut bevy::ui::widget::Text, With<TimeText>>,
+        Query<&mut bevy::ui::widget::Text, With<TimeScaleValueText>>,
+    )>,
     sim_time: Res<crate::orbital::SimulationTime>,
 ) {
     for mut text in texts.p0().iter_mut() {
         text.0 = format!("UTC: {}", sim_time.current_utc.format("%Y-%m-%d %H:%M:%S"));
+    }
+    for mut text in texts.p1().iter_mut() {
+        text.0 = format!("{:.0}x", sim_time.time_scale.max(1.0));
+    }
+}
+
+fn desired_satellite_list_width(store: &SatelliteStore) -> f32 {
+    let mut max_chars = 0usize;
+    for entry in store.items.values() {
+        let name = entry.name.as_deref().unwrap_or("Unnamed");
+        max_chars = max_chars.max(name.chars().count());
+    }
+    SATELLITE_LIST_FIXED_WIDTH_PX + (max_chars as f32 * SATELLITE_LIST_NAME_CHAR_PX)
+}
+
+fn update_satellite_list_panel_width(
+    store: Res<SatelliteStore>,
+    mut layout: ResMut<UiLayoutState>,
+    sections: Query<&Node, With<SatellitesListSection>>,
+) {
+    if !store.is_changed() {
+        return;
+    }
+
+    let Ok(node) = sections.single() else {
+        return;
+    };
+
+    if node.display != Display::Flex {
+        return;
+    }
+
+    let target = desired_satellite_list_width(&store)
+        .clamp(layout.right_panel_min_px, layout.right_panel_max_px);
+    if layout.right_panel_width_px < target {
+        layout.right_panel_width_px = target;
     }
 }
 
@@ -2986,8 +3245,6 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
             let should_check = match binding {
                 CheckboxBinding::ShowAxes => params.ui_state.show_axes,
                 CheckboxBinding::ShowArrows => params.arrows.enabled,
-                CheckboxBinding::ArrowGradient => params.arrows.gradient_enabled,
-                CheckboxBinding::ArrowGradientLog => params.arrows.gradient_log_scale,
                 CheckboxBinding::GroundTracksEnabled => {
                     params.config_bundle.ground_track_cfg.enabled
                 }
@@ -3061,8 +3318,6 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
 
         for (entity, binding) in params.sliders.iter() {
             let value = match binding {
-                SliderBinding::GradientNear => params.arrows.gradient_near_km,
-                SliderBinding::GradientFar => params.arrows.gradient_far_km,
                 SliderBinding::GroundTrackRadius => params.config_bundle.ground_track_cfg.radius_km,
                 SliderBinding::GizmoSegments => {
                     params.config_bundle.gizmo_cfg.circle_segments as f32
@@ -3074,9 +3329,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                 }
                 SliderBinding::HeatmapUpdatePeriod => params.heatmap_cfg.update_period_s,
                 SliderBinding::HeatmapOpacity => params.heatmap_cfg.color_alpha,
-                SliderBinding::HeatmapFixedMax => {
-                    params.heatmap_cfg.fixed_max.unwrap_or(20) as f32
-                }
+                SliderBinding::HeatmapFixedMax => params.heatmap_cfg.fixed_max.unwrap_or(20) as f32,
                 SliderBinding::HeatmapChunkSize => params.heatmap_cfg.chunk_size as f32,
                 SliderBinding::HeatmapChunksPerFrame => params.heatmap_cfg.chunks_per_frame as f32,
                 SliderBinding::AuroraIntensity => params.space_weather_cfg.aurora_intensity_scale,
@@ -3084,7 +3337,9 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                 SliderBinding::AuroraLongitudeOffset => {
                     params.space_weather_cfg.aurora_longitude_offset
                 }
-                SliderBinding::SatelliteSphereRadius => params.config_bundle.render_cfg.sphere_radius,
+                SliderBinding::SatelliteSphereRadius => {
+                    params.config_bundle.render_cfg.sphere_radius
+                }
                 SliderBinding::SatelliteEmissiveIntensity => {
                     params.config_bundle.render_cfg.emissive_intensity
                 }
@@ -3167,16 +3422,14 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                         if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup {
                             group: group.clone(),
                         }) {
-                            params.right_ui.error =
-                                Some(format!("Failed to request group: {}", e));
+                            params.right_ui.error = Some(format!("Failed to request group: {}", e));
                             params.right_ui.group_loading = false;
                         } else {
                             params.right_ui.group_loading = true;
                             params.right_ui.error = None;
                         }
                     } else {
-                        params.right_ui.error =
-                            Some("Fetch service not available".to_string());
+                        params.right_ui.error = Some("Fetch service not available".to_string());
                     }
                 } else {
                     params.right_ui.error = Some("Please select a group first".to_string());
@@ -3198,9 +3451,6 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
             }
             ButtonAction::StopTracking => {
                 params.selected.tracking = None;
-            }
-            ButtonAction::TimeScale1x => {
-                params.sim_time.time_scale = 1.0;
             }
             ButtonAction::TimeNow => {
                 params.sim_time.current_utc = chrono::Utc::now();
@@ -3258,16 +3508,28 @@ fn handle_section_toggle(
     ev: On<Activate>,
     q_toggle: Query<&SectionToggle>,
     mut nodes: Query<&mut Node>,
+    sat_list_sections: Query<(), With<SatellitesListSection>>,
+    store: Res<SatelliteStore>,
+    mut layout: ResMut<UiLayoutState>,
 ) {
     let Ok(toggle) = q_toggle.get(ev.entity) else {
         return;
     };
 
     if let Ok(mut node) = nodes.get_mut(toggle.body) {
-        node.display = match node.display {
+        let new_display = match node.display {
             Display::None => Display::Flex,
             _ => Display::None,
         };
+        node.display = new_display;
+
+        if new_display == Display::Flex && sat_list_sections.contains(toggle.body) {
+            let target = desired_satellite_list_width(&store)
+                .clamp(layout.right_panel_min_px, layout.right_panel_max_px);
+            if layout.right_panel_width_px < target {
+                layout.right_panel_width_px = target;
+            }
+        }
     }
 }
 
@@ -3276,8 +3538,6 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
         match binding {
             CheckboxBinding::ShowAxes => params.ui_state.show_axes = ev.value,
             CheckboxBinding::ShowArrows => params.arrows.enabled = ev.value,
-            CheckboxBinding::ArrowGradient => params.arrows.gradient_enabled = ev.value,
-            CheckboxBinding::ArrowGradientLog => params.arrows.gradient_log_scale = ev.value,
             CheckboxBinding::GroundTracksEnabled => {
                 params.config_bundle.ground_track_cfg.enabled = ev.value
             }
@@ -3318,7 +3578,6 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
 fn handle_slider_change(
     ev: On<ValueChange<f32>>,
     q_binding: Query<&SliderBinding>,
-    mut arrows: ResMut<ArrowConfig>,
     mut config_bundle: ResMut<UiConfigBundle>,
     mut heatmap_cfg: ResMut<HeatmapConfig>,
     mut space_weather_cfg: ResMut<SpaceWeatherConfig>,
@@ -3330,8 +3589,6 @@ fn handle_slider_change(
     };
 
     match binding {
-        SliderBinding::GradientNear => arrows.gradient_near_km = ev.value,
-        SliderBinding::GradientFar => arrows.gradient_far_km = ev.value,
         SliderBinding::GroundTrackRadius => config_bundle.ground_track_cfg.radius_km = ev.value,
         SliderBinding::GizmoSegments => {
             config_bundle.gizmo_cfg.circle_segments = ev.value.round().clamp(16.0, 128.0) as u32
@@ -3431,6 +3688,35 @@ fn text_input_on_click(
         }
         if let Some(mut focus_visible) = focus_visible {
             focus_visible.0 = true;
+        }
+    }
+}
+
+fn handle_tooltip_toggle_click(
+    ev: On<Pointer<Click>>,
+    toggles: Query<&TooltipToggle>,
+    mut bubbles: ParamSet<(
+        Query<&Node, With<TooltipBubble>>,
+        Query<&mut Node, With<TooltipBubble>>,
+    )>,
+) {
+    let Ok(toggle) = toggles.get(ev.entity) else {
+        return;
+    };
+
+    let should_show = bubbles
+        .p0()
+        .get(toggle.bubble)
+        .map(|node| node.display == Display::None)
+        .unwrap_or(true);
+
+    for mut node in bubbles.p1().iter_mut() {
+        node.display = Display::None;
+    }
+
+    if should_show {
+        if let Ok(mut node) = bubbles.p1().get_mut(toggle.bubble) {
+            node.display = Display::Flex;
         }
     }
 }
