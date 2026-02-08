@@ -23,7 +23,7 @@ pub struct ArrowConfig {
 impl Default for ArrowConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             color: Color::srgb(0.1, 0.9, 0.3),
             max_visible: 200,
             lift_m: 10000.0,

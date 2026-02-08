@@ -1,5 +1,8 @@
 //! Predefined satellite groups for easy selection
 
+use crate::satellite::resources::{GroupRegistry, SatelliteGroup};
+use bevy::prelude::*;
+
 /// Predefined satellite groups available on Celestrak
 pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
     (
@@ -203,3 +206,43 @@ pub const SATELLITE_GROUPS: &[(&str, &str)] = &[
         "Weather",
     ),
 ];
+
+/// Creates default colors for satellite groups using golden angle distribution
+///
+/// Uses the golden angle (137.5°) to distribute hues evenly around the color wheel,
+/// ensuring maximum color distinction between adjacent groups.
+/// Colors use high saturation (0.95) and medium-high lightness (0.65) for vibrancy.
+pub fn create_default_group_colors(count: usize) -> Vec<Color> {
+    const GOLDEN_ANGLE: f32 = 137.5;
+    const SATURATION: f32 = 0.95;
+    const LIGHTNESS: f32 = 0.65;
+
+    (0..count)
+        .map(|i| {
+            let hue = (i as f32 * GOLDEN_ANGLE) % 360.0;
+            Color::hsl(hue, SATURATION, LIGHTNESS)
+        })
+        .collect()
+}
+
+/// Initializes the GroupRegistry with all satellite groups and their default colors
+///
+/// Creates a GroupRegistry resource populated with all predefined satellite groups
+/// from SATELLITE_GROUPS, each assigned a distinct color using golden angle distribution.
+pub fn initialize_group_registry() -> GroupRegistry {
+    let colors = create_default_group_colors(SATELLITE_GROUPS.len());
+
+    let mut registry = GroupRegistry::default();
+
+    for ((url, name), color) in SATELLITE_GROUPS.iter().zip(colors.iter()) {
+        registry.groups.insert(
+            url.to_string(),
+            SatelliteGroup {
+                name: name.to_string(),
+                color: *color,
+            },
+        );
+    }
+
+    registry
+}

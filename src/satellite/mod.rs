@@ -16,7 +16,8 @@ pub use resources::{
 pub use systems::{
     draw_orbit_trails_system, init_satellite_render_assets, move_camera_to_satellite,
     propagate_satellites_system, satellite_click_system, spawn_missing_satellite_entities_system,
-    track_satellite_continuously, update_orbit_trails_system, update_satellite_rendering_system,
+    track_satellite_continuously, update_group_colors_system, update_orbit_trails_system,
+    update_satellite_rendering_system,
 };
 
 /// Plugin for satellite management and propagation
@@ -26,6 +27,7 @@ impl Plugin for SatellitePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SatelliteStore>()
             .init_resource::<SelectedSatellite>()
+            .insert_resource(crate::ui::groups::initialize_group_registry())
             // OrbitTrailConfig and SatelliteRenderConfig are now in UiConfigBundle
             .add_systems(Startup, init_satellite_render_assets)
             .add_systems(
@@ -36,6 +38,7 @@ impl Plugin for SatellitePlugin {
                     update_orbit_trails_system.after(propagate_satellites_system),
                     draw_orbit_trails_system.after(update_orbit_trails_system),
                     update_satellite_rendering_system,
+                    update_group_colors_system,
                     move_camera_to_satellite,
                     track_satellite_continuously.after(propagate_satellites_system),
                     satellite_click_system,

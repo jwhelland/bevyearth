@@ -17,7 +17,8 @@ use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirec
 use bevy::ui::{BackgroundGradient, Checked, Gradient, IsDefaultUiCamera, RelativeCursorPosition};
 use bevy::window::{PrimaryWindow, SystemCursorIcon};
 use bevy_feathers::controls::{
-    ButtonProps, ButtonVariant, SliderProps, button, checkbox, radio, slider,
+    ButtonProps, ButtonVariant, ColorChannel, ColorPlane, ColorPlaneValue, ColorSliderProps,
+    SliderBaseColor, SliderProps, button, checkbox, color_plane, color_slider, radio, slider,
 };
 use bevy_feathers::cursor::EntityCursor;
 use bevy_feathers::font_styles::InheritableFont;
@@ -32,6 +33,7 @@ use bevy_ui_widgets::{
     checkbox_self_update, slider_self_update,
 };
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::orbital::time::SimulationTime;
@@ -217,7 +219,7 @@ enum RangeModeBinding {
     Fixed,
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 enum ButtonAction {
     LoadGroup,
     ClearAll,
@@ -225,6 +227,34 @@ enum ButtonAction {
     StopTracking,
     TimeNow,
 }
+
+/// Component marker for color preview UI element
+#[derive(Component)]
+struct ColorPreview(String); // group URL
+
+/// Component marker for the color picker container
+#[derive(Component)]
+struct ColorPickerContainer;
+
+/// Component marker for the group color picker host area
+#[derive(Component)]
+struct GroupColorPickerHost;
+
+/// Component marker for group color swatch UI element
+#[derive(Component)]
+struct GroupColorSwatch(String); // group URL
+
+/// Component marker for group load status text
+#[derive(Component)]
+struct GroupLoadedText(String); // group URL
+
+/// Component marker for group color plane
+#[derive(Component)]
+struct GroupColorPlane(String); // group URL
+
+/// Component marker for group green channel slider
+#[derive(Component)]
+struct GroupColorGreenSlider(String); // group URL
 
 #[derive(Component, Clone, Copy)]
 enum SatelliteAction {
@@ -448,6 +478,8 @@ impl Plugin for UiSystemsPlugin {
                     // that might queue commands targeting the current list rows.
                     update_satellite_list,
                     enforce_orbitron_text,
+                    manage_color_picker_system,
+                    update_group_list_visuals,
                 )
                     .chain(),
             )
@@ -470,10 +502,13 @@ impl Plugin for UiSystemsPlugin {
             .add_observer(handle_checkbox_change)
             .add_observer(handle_slider_change)
             .add_observer(handle_range_mode_change)
+            .add_observer(handle_group_color_plane_change)
+            .add_observer(handle_group_color_green_change)
             .add_observer(text_input_on_click)
             .add_observer(text_input_on_key_input)
             .add_observer(handle_tooltip_toggle_click)
             .add_observer(handle_group_choice)
+            .add_observer(handle_group_swatch_click)
             .add_observer(handle_right_panel_resize_start)
             .add_observer(handle_right_panel_resize_drag)
             .add_observer(handle_right_panel_resize_end);
@@ -542,6 +577,7 @@ fn enforce_orbitron_text(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn setup_ui(
     mut commands: Commands,
     layout: Res<UiLayoutState>,
@@ -550,6 +586,7 @@ fn setup_ui(
     space_weather_cfg: Res<SpaceWeatherConfig>,
     selected: Res<SelectedSatellite>,
     sim_time: Res<crate::orbital::SimulationTime>,
+    group_registry: Option<Res<crate::satellite::resources::GroupRegistry>>,
 ) {
     let root = commands
         .spawn((
@@ -906,23 +943,178 @@ fn setup_ui(
                                             GroupList,
                                         ))
                                         .with_children(|groups| {
-                                            for (group_key, group_name) in SATELLITE_GROUPS {
-                                                groups.spawn((radio(
-                                                    (
-                                                        GroupChoice(group_key),
-                                                        AutoDirectionalNavigation::default(),
-                                                    ),
-                                                    Spawn((
-                                                        bevy::ui::widget::Text::new(*group_name),
+                                            let header_color = Color::srgba(0.45, 0.6, 0.7, 0.85);
+                                            groups
+                                                .spawn((
+                                                    Node {
+                                                        flex_direction: FlexDirection::Row,
+                                                        column_gap: Val::Px(6.0),
+                                                        align_items: AlignItems::Center,
+                                                        width: Val::Percent(100.0),
+                                                        ..default()
+                                                    },
+                                                    Pickable::IGNORE,
+                                                    ThemedText,
+                                                ))
+                                                .with_children(|row| {
+                                                    row.spawn((
+                                                        bevy::ui::widget::Text::new("Group"),
                                                         ThemedText,
-                                                    )),
-                                                ),));
+                                                        TextFont {
+                                                            font_size: 10.0,
+                                                            ..default()
+                                                        },
+                                                        TextColor(header_color),
+                                                        Node {
+                                                            flex_grow: 1.0,
+                                                            min_width: Val::Px(0.0),
+                                                            ..default()
+                                                        },
+                                                    ));
+                                                    row.spawn((
+                                                        bevy::ui::widget::Text::new("Status"),
+                                                        ThemedText,
+                                                        TextFont {
+                                                            font_size: 10.0,
+                                                            ..default()
+                                                        },
+                                                        TextColor(header_color),
+                                                        Node {
+                                                            width: Val::Px(54.0),
+                                                            justify_content: JustifyContent::Center,
+                                                            ..default()
+                                                        },
+                                                    ));
+                                                });
+
+                                            for (group_key, group_name) in SATELLITE_GROUPS {
+                                                let group_url = group_key.to_string();
+                                                groups
+                                                    .spawn((
+                                                        Node {
+                                                            flex_direction: FlexDirection::Column,
+                                                            row_gap: Val::Px(4.0),
+                                                            width: Val::Percent(100.0),
+                                                            ..default()
+                                                        },
+                                                        ThemedText,
+                                                    ))
+                                                    .with_children(|group_row| {
+                                                        group_row
+                                                            .spawn((
+                                                                Node {
+                                                                    flex_direction: FlexDirection::Row,
+                                                                    column_gap: Val::Px(6.0),
+                                                                    align_items: AlignItems::Center,
+                                                                    width: Val::Percent(100.0),
+                                                                    ..default()
+                                                                },
+                                                                ThemedText,
+                                                            ))
+                                                            .with_children(|row| {
+                                                                // Group name / radio
+                                                                row.spawn((
+                                                                    Node {
+                                                                        flex_direction: FlexDirection::Row,
+                                                                        column_gap: Val::Px(6.0),
+                                                                        align_items: AlignItems::Center,
+                                                                        flex_grow: 1.0,
+                                                                        min_width: Val::Px(0.0),
+                                                                        ..default()
+                                                                    },
+                                                                    ThemedText,
+                                                                ))
+                                                                .with_children(|cell| {
+                                                                    // Color swatch indicator
+                                                                    let swatch_color = group_registry
+                                                                        .as_ref()
+                                                                        .and_then(|registry| {
+                                                                            registry.groups.get(*group_key)
+                                                                        })
+                                                                        .map(|group| group.color)
+                                                                        .unwrap_or_else(|| {
+                                                                            Color::srgba(0.15, 0.2, 0.25, 0.9)
+                                                                        });
+                                                                    cell.spawn((
+                                                                        Node {
+                                                                            width: Val::Px(16.0),
+                                                                            height: Val::Px(16.0),
+                                                                            border_radius: BorderRadius::all(
+                                                                                Val::Px(3.0),
+                                                                            ),
+                                                                            border: UiRect::all(Val::Px(1.0)),
+                                                                            ..default()
+                                                                        },
+                                                                        BackgroundColor(swatch_color),
+                                                                        BorderColor::all(Color::srgba(
+                                                                            0.5, 0.6, 0.7, 0.8,
+                                                                        )),
+                                                                        GroupColorSwatch(group_url.clone()),
+                                                                        EntityCursor::System(
+                                                                            SystemCursorIcon::Pointer,
+                                                                        ),
+                                                                        Pickable::default(),
+                                                                    ));
+                                                                    cell.spawn((radio(
+                                                                        (
+                                                                            GroupChoice(group_key),
+                                                                            AutoDirectionalNavigation::default(),
+                                                                        ),
+                                                                        Spawn((
+                                                                            bevy::ui::widget::Text::new(
+                                                                                *group_name,
+                                                                            ),
+                                                                            ThemedText,
+                                                                        )),
+                                                                    ),));
+                                                                });
+
+                                                                // Loaded indicator (updated dynamically)
+                                                                row.spawn((
+                                                                    Node {
+                                                                        width: Val::Px(54.0),
+                                                                        justify_content:
+                                                                            JustifyContent::Center,
+                                                                        align_items: AlignItems::Center,
+                                                                        ..default()
+                                                                    },
+                                                                    ThemedText,
+                                                                ))
+                                                                .with_children(|cell| {
+                                                                    cell.spawn((
+                                                                        bevy::ui::widget::Text::new(""),
+                                                                        ThemedText,
+                                                                        TextFont {
+                                                                            font_size: 10.0,
+                                                                            ..default()
+                                                                        },
+                                                                        TextColor(Color::srgba(
+                                                                            0.55, 0.65, 0.75, 0.75,
+                                                                        )),
+                                                                        GroupLoadedText(group_url.clone()),
+                                                                    ));
+                                                                });
+
+                                                            });
+
+                                                    });
                                             }
                                         })
                                         .id();
 
                                     spawn_scrollbar(container, group_list_entity, 180.0);
                                 });
+
+                            section.spawn((
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(8.0),
+                                    width: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                ThemedText,
+                                GroupColorPickerHost,
+                            ));
 
                             section.spawn((button(
                                 ButtonProps {
@@ -950,6 +1142,7 @@ fn setup_ui(
                                 bevy::ui::widget::Text::new(""),
                                 ThemedText,
                             ));
+
                         });
 
                         let _ = spawn_section(parent, "Add Satellite", false, |section| {
@@ -1662,11 +1855,11 @@ fn spawn_info_icon_with_tooltip(parent: &mut ChildSpawnerCommands, tooltip: &str
                 .id();
 
             let bubble = spawn_tooltip_bubble_absolute(container, tooltip);
-        container
-            .commands()
-            .entity(icon_entity)
-            .insert(TooltipToggle { bubble });
-    });
+            container
+                .commands()
+                .entity(icon_entity)
+                .insert(TooltipToggle { bubble });
+        });
 }
 
 fn spawn_info_icon_with_tooltip_flow(parent: &mut ChildSpawnerCommands, tooltip: &str) {
@@ -1685,47 +1878,46 @@ fn spawn_info_icon_with_tooltip_flow(parent: &mut ChildSpawnerCommands, tooltip:
         .id();
 
     parent.commands().entity(container).with_children(|col| {
-        col
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ThemedText,
-            ))
-            .with_children(|row| {
-                icon_entity = row
-                    .spawn((
-                        Node {
-                            width: Val::Px(TOOLTIP_ICON_SIZE_PX),
-                            height: Val::Px(TOOLTIP_ICON_SIZE_PX),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(TOOLTIP_ICON_SIZE_PX * 0.5)),
+        col.spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|row| {
+            icon_entity = row
+                .spawn((
+                    Node {
+                        width: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                        height: Val::Px(TOOLTIP_ICON_SIZE_PX),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(TOOLTIP_ICON_SIZE_PX * 0.5)),
+                        ..default()
+                    },
+                    BackgroundColor(TOOLTIP_ICON_BG),
+                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                    EntityCursor::System(SystemCursorIcon::Pointer),
+                    Pickable::default(),
+                    ThemedText,
+                ))
+                .with_children(|icon| {
+                    icon.spawn((
+                        bevy::ui::widget::Text::new("i"),
+                        ThemedText,
+                        TextFont {
+                            font_size: 9.0,
                             ..default()
                         },
-                        BackgroundColor(TOOLTIP_ICON_BG),
-                        Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
-                        EntityCursor::System(SystemCursorIcon::Pointer),
-                        Pickable::default(),
-                        ThemedText,
-                    ))
-                    .with_children(|icon| {
-                        icon.spawn((
-                            bevy::ui::widget::Text::new("i"),
-                            ThemedText,
-                            TextFont {
-                                font_size: 9.0,
-                                ..default()
-                            },
-                            TextColor(TOOLTIP_TEXT),
-                        ));
-                    })
-                    .id();
-            });
+                        TextColor(TOOLTIP_TEXT),
+                    ));
+                })
+                .id();
+        });
 
         let bubble = spawn_tooltip_bubble(col, tooltip);
         col.commands()
@@ -1913,12 +2105,7 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
                         height: Val::Px(18.0),
                         ..default()
                     });
-                    spawn_pill_chip(
-                        row,
-                        "1x",
-                        LabelStyle::normal(11.0),
-                        TimeScaleValueText,
-                    );
+                    spawn_pill_chip(row, "1x", LabelStyle::normal(11.0), TimeScaleValueText);
                 });
             middle
                 .spawn((
@@ -2616,6 +2803,7 @@ fn update_camera_input_from_ui_hover(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_time_display(
     mut texts: ParamSet<(
         Query<&mut bevy::ui::widget::Text, With<TimeText>>,
@@ -2709,6 +2897,7 @@ fn update_status_texts(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_space_weather_texts(
     kp: Res<KpIndex>,
     solar_wind: Res<SolarWind>,
@@ -2928,6 +3117,7 @@ fn process_pending_add(
             show_ground_track: false,
             show_trail: false,
             is_clicked: false,
+            group_url: None,
         },
     );
     right_ui.error = None;
@@ -3676,6 +3866,106 @@ fn handle_group_choice(
     }
 }
 
+fn handle_group_swatch_click(
+    ev: On<Pointer<Click>>,
+    q_swatches: Query<&GroupColorSwatch>,
+    mut right_ui: ResMut<RightPanelUI>,
+) {
+    let Ok(swatch) = q_swatches.get(ev.entity) else {
+        return;
+    };
+
+    if right_ui.editing_group_color.as_deref() == Some(swatch.0.as_str()) {
+        right_ui.editing_group_color = None;
+    } else {
+        right_ui.editing_group_color = Some(swatch.0.clone());
+    }
+}
+
+fn handle_group_color_plane_change(
+    ev: On<ValueChange<Vec2>>,
+    mut q_plane: Query<(&GroupColorPlane, &mut ColorPlaneValue)>,
+    mut group_registry: ResMut<crate::satellite::resources::GroupRegistry>,
+    q_preview: Query<(Entity, &ColorPreview)>,
+    mut q_background: Query<&mut BackgroundColor>,
+    mut q_slider: Query<(&GroupColorGreenSlider, &mut SliderBaseColor)>,
+) {
+    let Ok((plane, mut plane_value)) = q_plane.get_mut(ev.source) else {
+        return;
+    };
+
+    let red = ev.value.x.clamp(0.0, 1.0);
+    let blue = ev.value.y.clamp(0.0, 1.0);
+    let green = plane_value.0.z.clamp(0.0, 1.0);
+    let color = Color::srgba(red, green, blue, 1.0);
+    plane_value.0.x = red;
+    plane_value.0.y = blue;
+
+    if let Some(group) = group_registry.groups.get_mut(&plane.0) {
+        group.color = color;
+    }
+
+    for (preview_entity, preview) in q_preview.iter() {
+        if preview.0 == plane.0
+            && let Ok(mut bg) = q_background.get_mut(preview_entity)
+        {
+            bg.0 = color;
+        }
+    }
+
+    for (slider, mut base_color) in q_slider.iter_mut() {
+        if slider.0 == plane.0 {
+            base_color.0 = color;
+        }
+    }
+}
+
+fn handle_group_color_green_change(
+    ev: On<ValueChange<f32>>,
+    q_slider: Query<&GroupColorGreenSlider>,
+    mut group_registry: ResMut<crate::satellite::resources::GroupRegistry>,
+    mut q_plane: Query<(&GroupColorPlane, &mut ColorPlaneValue)>,
+    q_preview: Query<(Entity, &ColorPreview)>,
+    mut q_background: Query<&mut BackgroundColor>,
+    mut q_slider_base: Query<(&GroupColorGreenSlider, &mut SliderBaseColor)>,
+) {
+    let Ok(slider) = q_slider.get(ev.source) else {
+        return;
+    };
+
+    let green = ev.value.clamp(0.0, 1.0);
+    let mut red = 0.0;
+    let mut blue = 0.0;
+
+    for (plane, mut plane_value) in q_plane.iter_mut() {
+        if plane.0 == slider.0 {
+            plane_value.0.z = green;
+            red = plane_value.0.x.clamp(0.0, 1.0);
+            blue = plane_value.0.y.clamp(0.0, 1.0);
+            break;
+        }
+    }
+
+    let color = Color::srgba(red, green, blue, 1.0);
+    if let Some(group) = group_registry.groups.get_mut(&slider.0) {
+        group.color = color;
+    }
+
+    for (preview_entity, preview) in q_preview.iter() {
+        if preview.0 == slider.0
+            && let Ok(mut bg) = q_background.get_mut(preview_entity)
+        {
+            bg.0 = color;
+        }
+    }
+
+    for (slider_ref, mut base_color) in q_slider_base.iter_mut() {
+        if slider_ref.0 == slider.0 {
+            base_color.0 = color;
+        }
+    }
+}
+
 fn text_input_on_click(
     ev: On<Pointer<Click>>,
     q_input: Query<(), With<TextInputField>>,
@@ -3692,6 +3982,7 @@ fn text_input_on_click(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn handle_tooltip_toggle_click(
     ev: On<Pointer<Click>>,
     toggles: Query<&TooltipToggle>,
@@ -3714,10 +4005,8 @@ fn handle_tooltip_toggle_click(
         node.display = Display::None;
     }
 
-    if should_show {
-        if let Ok(mut node) = bubbles.p1().get_mut(toggle.bubble) {
-            node.display = Display::Flex;
-        }
+    if should_show && let Ok(mut node) = bubbles.p1().get_mut(toggle.bubble) {
+        node.display = Display::Flex;
     }
 }
 
@@ -3824,5 +4113,208 @@ fn navigate_focus_with_arrows(
 
     if let Some(direction) = direction {
         let _ = navigator.navigate(direction);
+    }
+}
+
+/// System to dynamically manage the color picker UI based on editing_group_color
+fn manage_color_picker_system(
+    mut commands: Commands,
+    right_ui: Res<RightPanelUI>,
+    group_registry: Option<Res<crate::satellite::resources::GroupRegistry>>,
+    mut q_host: Query<(Entity, Option<&Children>, &mut Node), With<GroupColorPickerHost>>,
+    q_container: Query<Entity, With<ColorPickerContainer>>,
+) {
+    if !right_ui.is_changed() {
+        return;
+    }
+
+    let Ok((host_entity, children, mut node)) = q_host.single_mut() else {
+        return;
+    };
+
+    if let Some(children) = children {
+        for child in children {
+            if q_container.contains(*child) {
+                commands.entity(*child).despawn();
+            }
+        }
+    }
+
+    let Some(editing_url) = right_ui.editing_group_color.as_deref() else {
+        node.display = Display::None;
+        return;
+    };
+
+    let Some(registry) = group_registry.as_ref() else {
+        node.display = Display::None;
+        return;
+    };
+
+    let Some(group) = registry.groups.get(editing_url) else {
+        node.display = Display::None;
+        return;
+    };
+
+    node.display = Display::Flex;
+    let editing_url = editing_url.to_string();
+    commands.entity(host_entity).with_children(|parent| {
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.8)),
+                Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
+                ThemedText,
+                ColorPickerContainer,
+            ))
+            .with_children(|picker| {
+                picker.spawn((
+                    bevy::ui::widget::Text::new(format!("Edit color: {}", group.name)),
+                    ThemedText,
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(PANEL_TEXT_ACCENT),
+                ));
+
+                // Color preview
+                picker.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(30.0),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(group.color),
+                    ColorPreview(editing_url.clone()),
+                ));
+
+                // Get current RGB values
+                let [r, g, b, _] = group.color.to_srgba().to_f32_array();
+
+                picker
+                    .spawn((
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(12.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        ThemedText,
+                    ))
+                    .with_children(|row| {
+                        let plane_entity = row
+                            .spawn((color_plane(
+                                ColorPlane::RedBlue,
+                                (
+                                    GroupColorPlane(editing_url.clone()),
+                                    AutoDirectionalNavigation::default(),
+                                ),
+                            ),))
+                            .id();
+                        row.commands().entity(plane_entity).insert((
+                            ColorPlaneValue(Vec3::new(r, b, g)),
+                            Node {
+                                width: Val::Px(160.0),
+                                height: Val::Px(160.0),
+                                padding: UiRect::all(Val::Px(4.0)),
+                                border_radius: BorderRadius::all(Val::Px(5.0)),
+                                ..default()
+                            },
+                        ));
+
+                        row.spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(6.0),
+                                align_items: AlignItems::FlexStart,
+                                ..default()
+                            },
+                            ThemedText,
+                        ))
+                        .with_children(|col| {
+                            col.spawn((bevy::ui::widget::Text::new("Green"), ThemedText));
+                            let slider_entity = col
+                                .spawn((color_slider(
+                                    ColorSliderProps {
+                                        value: g,
+                                        channel: ColorChannel::Green,
+                                    },
+                                    (
+                                        GroupColorGreenSlider(editing_url.clone()),
+                                        SliderStep(0.01),
+                                        SliderPrecision(2),
+                                        AutoDirectionalNavigation::default(),
+                                    ),
+                                ),))
+                                .id();
+                            col.commands().entity(slider_entity).insert((
+                                SliderBaseColor(group.color),
+                                Node {
+                                    width: Val::Px(180.0),
+                                    height: Val::Px(16.0),
+                                    ..default()
+                                },
+                            ));
+                        });
+                    });
+            });
+    });
+}
+
+fn update_group_list_visuals(
+    right_ui: Res<RightPanelUI>,
+    store: Res<SatelliteStore>,
+    group_registry: Res<crate::satellite::resources::GroupRegistry>,
+    mut swatches: Query<(&GroupColorSwatch, &mut BackgroundColor, &mut BorderColor)>,
+    mut status_texts: Query<(
+        &GroupLoadedText,
+        &mut bevy::ui::widget::Text,
+        &mut TextColor,
+    )>,
+) {
+    if !right_ui.is_changed() && !store.is_changed() && !group_registry.is_changed() {
+        return;
+    }
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for entry in store.items.values() {
+        if let Some(group_url) = entry.group_url.as_deref() {
+            *counts.entry(group_url).or_default() += 1;
+        }
+    }
+
+    let active_group = right_ui.editing_group_color.as_deref();
+    for (swatch, mut background, mut border) in swatches.iter_mut() {
+        if let Some(group) = group_registry.groups.get(&swatch.0) {
+            background.0 = group.color;
+        }
+        let is_active = active_group == Some(swatch.0.as_str());
+        let border_color = if is_active {
+            Color::srgba(0.4, 1.0, 1.0, 0.95)
+        } else {
+            Color::srgba(0.5, 0.6, 0.7, 0.8)
+        };
+        border.top = border_color;
+        border.right = border_color;
+        border.bottom = border_color;
+        border.left = border_color;
+    }
+
+    for (status, mut text, mut color) in status_texts.iter_mut() {
+        let count = counts.get(status.0.as_str()).copied().unwrap_or(0);
+        if count > 0 {
+            text.0 = "Loaded".to_string();
+            color.0 = Color::srgba(0.6, 0.9, 0.6, 0.85);
+        } else {
+            text.0.clear();
+            color.0 = Color::srgba(0.55, 0.65, 0.75, 0.75);
+        }
     }
 }

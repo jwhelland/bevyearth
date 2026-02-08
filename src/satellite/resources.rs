@@ -4,6 +4,22 @@ use crate::tle::TleData;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Represents a satellite group with its associated metadata
+#[derive(Clone, Debug)]
+pub struct SatelliteGroup {
+    /// Human-readable name for the group
+    pub name: String,
+    /// Color assigned to all satellites in this group
+    pub color: Color,
+}
+
+/// Resource for managing satellite groups and their colors
+#[derive(Resource, Default)]
+pub struct GroupRegistry {
+    /// Maps group URL to group metadata
+    pub groups: HashMap<String, SatelliteGroup>,
+}
+
 /// Resource for storing satellite data and state
 #[derive(Resource)]
 pub struct SatelliteStore {
@@ -37,6 +53,8 @@ pub struct SatEntry {
     pub show_trail: bool,
     /// Whether this satellite is currently clicked/selected for display
     pub is_clicked: bool,
+    /// The group URL this satellite belongs to (for color assignment)
+    pub group_url: Option<String>,
 }
 
 /// Resource for configuring orbit trail behavior
@@ -93,7 +111,7 @@ impl Default for SatelliteRenderConfig {
     fn default() -> Self {
         Self {
             sphere_radius: 100.0,
-            emissive_intensity: 20.0,
+            emissive_intensity: 1.5,
         }
     }
 }

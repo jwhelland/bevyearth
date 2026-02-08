@@ -31,6 +31,7 @@ pub enum FetchResultMsg {
         line1: String,
         line2: String,
         epoch_utc: DateTime<Utc>,
+        group: Option<String>,
     },
     Failure {
         norad: u32,

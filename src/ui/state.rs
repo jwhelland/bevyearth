@@ -57,4 +57,6 @@ pub struct RightPanelUI {
     pub selected_group: Option<String>,
     pub group_loading: bool,
     pub pending_add: bool,
+    /// URL of the group whose color is currently being edited (for color picker UI)
+    pub editing_group_color: Option<String>,
 }

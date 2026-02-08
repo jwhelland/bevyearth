@@ -204,6 +204,7 @@ pub fn initialize_aurora_overlay(
         generate_noise_map(render_state.noise_width, render_state.noise_height);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_aurora_texture(
     config: Res<SpaceWeatherConfig>,
     aurora: Res<AuroraGrid>,

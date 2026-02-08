@@ -6,7 +6,10 @@ use crate::orbital::{
     Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
 use crate::satellite::components::{NoradId, OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{SatelliteRenderAssets, SatelliteStore, SelectedSatellite};
+use crate::satellite::resources::{
+    GroupRegistry, SatelliteRenderAssets, SatelliteStore, SelectedSatellite,
+};
+use bevy::color::LinearRgba;
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -92,8 +95,8 @@ pub fn spawn_missing_satellite_entities_system(
                 .spawn((
                     Mesh3d(render_assets.sphere_mesh.clone()),
                     MeshMaterial3d(materials.add(StandardMaterial {
-                        // base_color: entry.color,
-                        emissive: entry.color.to_linear()
+                        base_color: entry.color,
+                        emissive: LinearRgba::from(entry.color)
                             * config_bundle.render_cfg.emissive_intensity,
                         ..Default::default()
                     })),
@@ -393,12 +396,58 @@ pub fn update_satellite_rendering_system(
         // Update scale based on sphere_radius
         transform.scale = Vec3::splat(config_bundle.render_cfg.sphere_radius);
 
-        // Update material emissive intensity
+        // Update material emissive intensity and base color
         if let Ok(material_handle) = material_query.get(entity)
             && let Some(material) = materials.get_mut(&material_handle.0)
         {
+            material.base_color = satellite_color.0;
             material.emissive =
-                satellite_color.0.to_linear() * config_bundle.render_cfg.emissive_intensity;
+                LinearRgba::from(satellite_color.0) * config_bundle.render_cfg.emissive_intensity;
+        }
+    }
+}
+
+/// System to propagate group color changes to all satellites in affected groups
+///
+/// This system runs when the GroupRegistry is changed (e.g., via UI color picker)
+/// and updates the color of all satellites belonging to the modified group.
+pub fn update_group_colors_system(
+    group_registry: Option<Res<GroupRegistry>>,
+    mut store: ResMut<SatelliteStore>,
+    config_bundle: Res<crate::ui::systems::UiConfigBundle>,
+    mut satellite_query: Query<(&NoradId, &mut SatelliteColor, Entity), With<Satellite>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    material_query: Query<&MeshMaterial3d<StandardMaterial>>,
+) {
+    // Only proceed if GroupRegistry exists and has changed
+    let Some(registry) = group_registry else {
+        return;
+    };
+    if !registry.is_changed() {
+        return;
+    }
+
+    // Update colors for satellites that belong to groups
+    for (norad_id, mut satellite_color, entity) in satellite_query.iter_mut() {
+        if let Some(entry) = store.items.get_mut(&norad_id.0) {
+            // Check if this satellite belongs to a group
+            if let Some(group_url) = &entry.group_url {
+                // Look up the group's current color
+                if let Some(group) = registry.groups.get(group_url) {
+                    // Update the color in all relevant places
+                    entry.color = group.color;
+                    satellite_color.0 = group.color;
+
+                    // Update the material
+                    if let Ok(material_handle) = material_query.get(entity)
+                        && let Some(material) = materials.get_mut(&material_handle.0)
+                    {
+                        material.base_color = group.color;
+                        material.emissive = LinearRgba::from(group.color)
+                            * config_bundle.render_cfg.emissive_intensity;
+                    }
+                }
+            }
         }
     }
 }

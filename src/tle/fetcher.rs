@@ -137,6 +137,7 @@ pub fn start_tle_worker() -> FetchChannels {
                                     line1,
                                     line2,
                                     epoch_utc,
+                                    group: None,
                                 })
                             }
                             Err(e) => {
@@ -183,6 +184,7 @@ pub fn start_tle_worker() -> FetchChannels {
                                     line1: entry.line1,
                                     line2: entry.line2,
                                     epoch_utc,
+                                    group: Some(group_name.clone()),
                                 });
                             }
                             Ok::<_, anyhow::Error>(count)

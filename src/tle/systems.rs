@@ -1,6 +1,7 @@
 //! TLE processing systems
 
 use crate::satellite::SatelliteStore;
+use crate::satellite::resources::GroupRegistry;
 use crate::tle::parser::parse_tle_epoch_to_utc;
 use crate::tle::types::{FetchChannels, FetchResultMsg, TleData};
 use crate::ui::state::RightPanelUI;
@@ -10,6 +11,7 @@ use bevy::prelude::*;
 pub fn process_fetch_results_system(
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
+    group_registry: Option<Res<GroupRegistry>>,
     fetch: Option<Res<FetchChannels>>,
 ) {
     let Some(fetch) = fetch else { return };
@@ -24,6 +26,7 @@ pub fn process_fetch_results_system(
                 line1,
                 line2,
                 epoch_utc,
+                group,
             } => {
                 if let Some(s) = store.items.get_mut(&norad) {
                     // clear previous error
@@ -65,8 +68,32 @@ pub fn process_fetch_results_system(
                     // Create a new SatEntry for this NORAD
                     use crate::satellite::SatEntry;
                     use bevy::prelude::Color;
-                    let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
-                    store.next_color_hue = (store.next_color_hue + 137.5) % 360.0; // Golden angle for color diversity
+
+                    // Determine color and group_url based on whether this is a group load
+                    let (color, group_url) = if let Some(group_url) = group {
+                        // Try to get color from group registry
+                        if let Some(registry) = &group_registry {
+                            if let Some(group) = registry.groups.get(&group_url) {
+                                (group.color, Some(group_url))
+                            } else {
+                                // Group not found, fall back to golden angle
+                                let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
+                                store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
+                                (color, Some(group_url))
+                            }
+                        } else {
+                            // No registry available, fall back to golden angle
+                            let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
+                            store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
+                            (color, Some(group_url))
+                        }
+                    } else {
+                        // Not loading as part of a group, use golden angle
+                        let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
+                        store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
+                        (color, None)
+                    };
+
                     let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
                     let name_val = name.clone().or_else(|| Some(format!("NORAD {}", norad)));
                     let propagator = sgp4::Elements::from_tle(
@@ -86,6 +113,7 @@ pub fn process_fetch_results_system(
                         show_ground_track: false,
                         show_trail: false,
                         is_clicked: false,
+                        group_url,
                     };
                     store.items.insert(norad, entry);
                 }

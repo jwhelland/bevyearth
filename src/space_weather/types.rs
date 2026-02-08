@@ -124,6 +124,7 @@ pub enum SpaceWeatherFeed {
     Plasma,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum SpaceWeatherCommand {
     FetchOvation,
