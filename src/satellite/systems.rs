@@ -406,9 +406,8 @@ pub fn update_satellite_rendering_system(
             && let Some(material) = materials.get_mut(&material_handle.0)
         {
             material.base_color = satellite_color.0;
-            material.emissive =
-                LinearRgba::from(satellite_color.0)
-                    * emissive_scale(config_bundle.render_cfg.emissive_intensity);
+            material.emissive = LinearRgba::from(satellite_color.0)
+                * emissive_scale(config_bundle.render_cfg.emissive_intensity);
         }
     }
 }
