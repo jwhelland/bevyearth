@@ -11,7 +11,8 @@ pub mod systems;
 
 pub use components::{Satellite, SatelliteColor};
 pub use resources::{
-    OrbitTrailConfig, SatEntry, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
+    GroupMaterialCache, OrbitTrailConfig, SatEntry, SatelliteRenderConfig, SatelliteStore,
+    SelectedSatellite,
 };
 pub use systems::{
     draw_orbit_trails_system, init_satellite_render_assets, move_camera_to_satellite,
@@ -27,6 +28,7 @@ impl Plugin for SatellitePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SatelliteStore>()
             .init_resource::<SelectedSatellite>()
+            .init_resource::<GroupMaterialCache>()
             .insert_resource(crate::ui::groups::initialize_group_registry())
             // OrbitTrailConfig and SatelliteRenderConfig are now in UiConfigBundle
             .add_systems(Startup, init_satellite_render_assets)

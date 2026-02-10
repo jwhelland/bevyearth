@@ -121,3 +121,9 @@ impl Default for SatelliteRenderConfig {
 pub struct SatelliteRenderAssets {
     pub sphere_mesh: Handle<Mesh>,
 }
+
+/// Shared materials for satellite groups (keyed by group URL).
+#[derive(Resource, Default)]
+pub struct GroupMaterialCache {
+    pub materials: HashMap<String, Handle<StandardMaterial>>,
+}

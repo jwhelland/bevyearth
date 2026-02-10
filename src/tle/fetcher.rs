@@ -170,7 +170,6 @@ pub fn start_tle_worker() -> FetchChannels {
                             let lines = clean_tle_lines(&body);
                             let entries = parse_tle_pairs(&lines);
                             let count = entries.len();
-
                             for entry in entries {
                                 let epoch_utc =
                                     parse_tle_epoch_to_utc(&entry.line1).unwrap_or_else(Utc::now);
