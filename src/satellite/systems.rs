@@ -23,6 +23,11 @@ type CameraQuery<'w, 's> = Query<
     (With<Camera3d>, Without<Satellite>),
 >;
 
+fn emissive_scale(intensity: f32) -> f32 {
+    // Square for perceptual control: low values have more visible effect, high values still pop.
+    intensity * intensity
+}
+
 /// Create shared satellite render assets
 pub fn init_satellite_render_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let mesh = Sphere::new(1.0).mesh().ico(4).unwrap();
@@ -97,7 +102,7 @@ pub fn spawn_missing_satellite_entities_system(
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: entry.color,
                         emissive: LinearRgba::from(entry.color)
-                            * config_bundle.render_cfg.emissive_intensity,
+                            * emissive_scale(config_bundle.render_cfg.emissive_intensity),
                         ..Default::default()
                     })),
                     NoradId(norad),
@@ -402,7 +407,8 @@ pub fn update_satellite_rendering_system(
         {
             material.base_color = satellite_color.0;
             material.emissive =
-                LinearRgba::from(satellite_color.0) * config_bundle.render_cfg.emissive_intensity;
+                LinearRgba::from(satellite_color.0)
+                    * emissive_scale(config_bundle.render_cfg.emissive_intensity);
         }
     }
 }
@@ -444,7 +450,7 @@ pub fn update_group_colors_system(
                     {
                         material.base_color = group.color;
                         material.emissive = LinearRgba::from(group.color)
-                            * config_bundle.render_cfg.emissive_intensity;
+                            * emissive_scale(config_bundle.render_cfg.emissive_intensity);
                     }
                 }
             }

@@ -34,7 +34,6 @@ use bevy_ui_widgets::{
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
 use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::time::SimulationTime;
@@ -70,7 +69,6 @@ struct UiEntities {
     top_panel: Entity,
     bottom_panel: Entity,
     satellite_list: Entity,
-    hidden_panels_hint: Entity,
 }
 
 #[derive(Component)]
@@ -92,15 +90,6 @@ struct SatelliteList;
 struct GroupList;
 
 #[derive(Component)]
-struct HiddenPanelsHint;
-
-#[derive(Resource, Default)]
-struct HiddenPanelsHintState {
-    last_shown: Option<Instant>,
-    visible: bool,
-}
-
-#[derive(Component)]
 struct RightPanelResizeHandle;
 
 #[derive(Component)]
@@ -117,9 +106,6 @@ struct TimeScaleValueText;
 
 #[derive(Component)]
 struct FocusToggleText;
-
-#[derive(Component)]
-struct HiddenPanelsHintCard;
 
 fn queue_set_checked(commands: &mut Commands, entity: Entity, checked: bool) {
     commands
@@ -282,7 +268,6 @@ enum SatelliteToggleKind {
 enum PanelToggleKind {
     Left,
     Right,
-    Top,
     Bottom,
 }
 
@@ -343,8 +328,6 @@ const TOP_PANEL_HEIGHT_PX: f32 = 52.0;
 const BOTTOM_PANEL_HEIGHT_PX: f32 = 32.0;
 const GRID_LINE: Color = Color::srgba(0.1, 0.6, 0.7, 0.10);
 const GRID_STEPS: [f32; 9] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0];
-const HIDDEN_PANELS_HINT_DURATION: Duration = Duration::from_secs(5);
-const HIDDEN_PANELS_HINT_OFFSET_X_PX: f32 = 320.0;
 const SATELLITE_LIST_NAME_CHAR_PX: f32 = 7.0;
 const SATELLITE_LIST_FIXED_WIDTH_PX: f32 = 316.0;
 
@@ -464,77 +447,75 @@ pub struct UiSystemsPlugin;
 
 impl Plugin for UiSystemsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HiddenPanelsHintState>()
-            .add_systems(
-                Startup,
-                (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
+        app.add_systems(
+            Startup,
+            (setup_ui_camera, setup_ui, apply_orbitron_font, load_ui_font).chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                toggle_panels_keyboard,
+                apply_panel_visibility,
+                apply_panel_layout,
+                sync_panel_toggle_buttons,
+                scroll_right_panel_on_wheel,
+                update_time_display,
+                update_status_texts,
+                update_space_weather_texts,
+                update_text_input_display,
+                update_satellite_list_panel_width,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                process_pending_add,
+                sync_widget_states,
+                sync_slider_visuals,
+                handle_group_loading_text,
+                navigate_focus_with_arrows,
+                // IMPORTANT: this despawns/spawns UI entities; it must run after any system
+                // that might queue commands targeting the current list rows.
+                update_satellite_list,
+                enforce_orbitron_text,
+                manage_color_picker_system,
+                update_group_list_visuals,
             )
-            .add_systems(
-                Update,
-                (
-                    toggle_panels_keyboard,
-                    apply_panel_visibility,
-                    apply_panel_layout,
-                    update_hidden_panels_hint,
-                    sync_panel_toggle_buttons,
-                    scroll_right_panel_on_wheel,
-                    update_time_display,
-                    update_status_texts,
-                    update_space_weather_texts,
-                    update_text_input_display,
-                    update_satellite_list_panel_width,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    process_pending_add,
-                    sync_widget_states,
-                    sync_slider_visuals,
-                    handle_group_loading_text,
-                    navigate_focus_with_arrows,
-                    // IMPORTANT: this despawns/spawns UI entities; it must run after any system
-                    // that might queue commands targeting the current list rows.
-                    update_satellite_list,
-                    enforce_orbitron_text,
-                    manage_color_picker_system,
-                    update_group_list_visuals,
-                )
-                    .chain(),
-            )
-            // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
-            // and late enough that no later system overwrites our settings before extraction.
-            .add_systems(
-                PostUpdate,
-                (enforce_ui_camera_settings, update_camera_viewport_from_ui)
-                    .chain()
-                    .after(UiSystems::Layout),
-            )
-            .add_systems(
-                PostUpdate,
-                update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
-            )
-            .add_systems(
-                PostUpdate,
-                lock_camera_focus_to_target.after(PanOrbitCameraSystemSet),
-            )
-            .add_observer(checkbox_self_update)
-            .add_observer(slider_self_update)
-            .add_observer(handle_button_activate)
-            .add_observer(handle_section_toggle)
-            .add_observer(handle_checkbox_change)
-            .add_observer(handle_slider_change)
-            .add_observer(handle_range_mode_change)
-            .add_observer(handle_group_color_plane_change)
-            .add_observer(handle_group_color_green_change)
-            .add_observer(text_input_on_click)
-            .add_observer(text_input_on_key_input)
-            .add_observer(handle_tooltip_toggle_click)
-            .add_observer(handle_group_choice)
-            .add_observer(handle_group_swatch_click)
-            .add_observer(handle_right_panel_resize_start)
-            .add_observer(handle_right_panel_resize_drag)
-            .add_observer(handle_right_panel_resize_end);
+                .chain(),
+        )
+        // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
+        // and late enough that no later system overwrites our settings before extraction.
+        .add_systems(
+            PostUpdate,
+            (enforce_ui_camera_settings, update_camera_viewport_from_ui)
+                .chain()
+                .after(UiSystems::Layout),
+        )
+        .add_systems(
+            PostUpdate,
+            update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
+        )
+        .add_systems(
+            PostUpdate,
+            lock_camera_focus_to_target.after(PanOrbitCameraSystemSet),
+        )
+        .add_observer(checkbox_self_update)
+        .add_observer(slider_self_update)
+        .add_observer(handle_button_activate)
+        .add_observer(handle_section_toggle)
+        .add_observer(handle_checkbox_change)
+        .add_observer(handle_slider_change)
+        .add_observer(handle_range_mode_change)
+        .add_observer(handle_group_color_plane_change)
+        .add_observer(handle_group_color_green_change)
+        .add_observer(text_input_on_click)
+        .add_observer(text_input_on_key_input)
+        .add_observer(handle_tooltip_toggle_click)
+        .add_observer(handle_group_choice)
+        .add_observer(handle_group_swatch_click)
+        .add_observer(handle_right_panel_resize_start)
+        .add_observer(handle_right_panel_resize_drag)
+        .add_observer(handle_right_panel_resize_end);
     }
 }
 
@@ -771,11 +752,6 @@ fn setup_ui(
     commands.entity(root).add_child(right_panel);
     commands.entity(root).add_child(top_panel);
     commands.entity(root).add_child(bottom_panel);
-
-    let mut hidden_panels_hint = Entity::PLACEHOLDER;
-    commands.entity(root).with_children(|parent| {
-        hidden_panels_hint = spawn_hidden_panels_hint(parent);
-    });
 
     commands.entity(left_panel).with_children(|panel| {
         spawn_edge_glow(panel, Edge::Right);
@@ -1460,10 +1436,10 @@ fn setup_ui(
                                 section,
                                 "Emissive intensity",
                                 SliderBinding::SatelliteEmissiveIntensity,
-                                10.0,
-                                500.0,
+                                0.0,
+                                20.0,
                                 config_bundle.render_cfg.emissive_intensity,
-                                5.0,
+                                0.5,
                             );
                         });
 
@@ -1648,27 +1624,47 @@ fn setup_ui(
     commands.entity(top_panel).with_children(|parent| {
         spawn_top_time_row(parent);
         spawn_top_speed_row(parent, sim_time.time_scale);
-        spawn_top_focus_row(parent);
         spawn_top_panel_toggles_row(parent);
     });
 
     // Bottom panel contents
     commands.entity(bottom_panel).with_children(|parent| {
-        parent.spawn((
+        spawn_pill_chip(
+            parent,
+            "Satellites: 0",
+            LabelStyle::normal(11.0),
             SatelliteCountText,
-            bevy::ui::widget::Text::new("Satellites: 0"),
-            ThemedText,
-        ));
-        parent.spawn((
+        );
+        spawn_pill_chip(
+            parent,
+            "TLE Fetcher: --",
+            LabelStyle::normal(11.0),
             FetchStatusText,
-            bevy::ui::widget::Text::new("TLE Fetcher: --"),
-            ThemedText,
-        ));
-        parent.spawn((
+        );
+        spawn_pill_chip(
+            parent,
+            "Selected: None",
+            LabelStyle::normal(11.0),
             SelectedSatelliteText,
-            bevy::ui::widget::Text::new("Selected: None"),
-            ThemedText,
-        ));
+        );
+        parent
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
+            .with_children(|center| {
+                spawn_focus_toggle_row(center);
+            });
     });
 
     commands.insert_resource(UiEntities {
@@ -1677,7 +1673,6 @@ fn setup_ui(
         top_panel,
         bottom_panel,
         satellite_list,
-        hidden_panels_hint,
     });
 }
 
@@ -2189,7 +2184,7 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
         });
 }
 
-fn spawn_top_focus_row(parent: &mut ChildSpawnerCommands) {
+fn spawn_focus_toggle_row(parent: &mut ChildSpawnerCommands) {
     parent
         .spawn((
             Node {
@@ -2261,7 +2256,7 @@ fn spawn_top_panel_toggles_row(parent: &mut ChildSpawnerCommands) {
                     },
                     AutoDirectionalNavigation::default(),
                 ),
-                "Vis",
+                "View",
             );
             spawn_fixed_button(
                 right,
@@ -2281,18 +2276,6 @@ fn spawn_top_panel_toggles_row(parent: &mut ChildSpawnerCommands) {
                 ButtonProps::default(),
                 (
                     PanelToggle {
-                        kind: PanelToggleKind::Top,
-                    },
-                    AutoDirectionalNavigation::default(),
-                ),
-                "Time",
-            );
-            spawn_fixed_button(
-                right,
-                64.0,
-                ButtonProps::default(),
-                (
-                    PanelToggle {
                         kind: PanelToggleKind::Bottom,
                     },
                     AutoDirectionalNavigation::default(),
@@ -2300,62 +2283,6 @@ fn spawn_top_panel_toggles_row(parent: &mut ChildSpawnerCommands) {
                 "Status",
             );
         });
-}
-
-fn spawn_hidden_panels_hint(parent: &mut ChildSpawnerCommands) -> Entity {
-    parent
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Auto,
-                justify_content: JustifyContent::FlexStart,
-                align_items: AlignItems::Center,
-                padding: UiRect::top(Val::Px(12.0)),
-                display: Display::None,
-                ..default()
-            },
-            Pickable::IGNORE,
-            ThemedText,
-            HiddenPanelsHint,
-        ))
-        .with_children(|overlay| {
-            overlay
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(6.0),
-                        padding: UiRect::all(Val::Px(12.0)),
-                        margin: UiRect::left(Val::Px(HIDDEN_PANELS_HINT_OFFSET_X_PX)),
-                        max_width: Val::Px(360.0),
-                        border_radius: BorderRadius::all(Val::Px(10.0)),
-                        ..default()
-                    },
-                    BackgroundColor(PANEL_INNER_BG),
-                    Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE),
-                    Pickable::IGNORE,
-                    ThemedText,
-                    HiddenPanelsHintCard,
-                ))
-                .with_children(|card| {
-                    spawn_styled_text(card, "Panels hidden", LabelStyle::accent(15.0), ());
-                    spawn_styled_text(
-                        card,
-                        "H=Vis, J=Sat, K=Time, L=Status",
-                        LabelStyle::normal(12.0),
-                        (),
-                    );
-                    spawn_styled_text(
-                        card,
-                        "V = Toggle viewport crop",
-                        LabelStyle::normal(11.0),
-                        (),
-                    );
-                });
-        })
-        .id()
 }
 
 fn spawn_section(
@@ -2627,9 +2554,6 @@ fn toggle_panels_keyboard(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<UI
     if input.just_pressed(KeyCode::KeyJ) {
         state.show_right_panel = !state.show_right_panel;
     }
-    if input.just_pressed(KeyCode::KeyK) {
-        state.show_top_panel = !state.show_top_panel;
-    }
     if input.just_pressed(KeyCode::KeyL) {
         state.show_bottom_panel = !state.show_bottom_panel;
     }
@@ -2715,36 +2639,6 @@ fn apply_panel_layout(
         node.top = top;
         node.bottom = bottom;
         node.width = Val::Px(layout.right_panel_width_px);
-    }
-}
-
-fn update_hidden_panels_hint(
-    ui_state: Res<UIState>,
-    ui_entities: Res<UiEntities>,
-    mut hint_state: ResMut<HiddenPanelsHintState>,
-    mut nodes: Query<&mut Node, With<HiddenPanelsHint>>,
-) {
-    let show_hint = !ui_state.show_top_panel;
-
-    let Ok(mut node) = nodes.get_mut(ui_entities.hidden_panels_hint) else {
-        return;
-    };
-
-    if show_hint {
-        if !hint_state.visible {
-            hint_state.visible = true;
-            hint_state.last_shown = Some(Instant::now());
-            node.display = Display::Flex;
-        } else if let Some(shown_at) = hint_state.last_shown
-            && shown_at.elapsed() > HIDDEN_PANELS_HINT_DURATION
-        {
-            hint_state.visible = false;
-            node.display = Display::None;
-        }
-    } else if hint_state.visible || hint_state.last_shown.is_some() {
-        hint_state.visible = false;
-        hint_state.last_shown = None;
-        node.display = Display::None;
     }
 }
 
@@ -3164,7 +3058,6 @@ fn sync_panel_toggle_buttons(
         let is_on = match toggle.kind {
             PanelToggleKind::Left => ui_state.show_left_panel,
             PanelToggleKind::Right => ui_state.show_right_panel,
-            PanelToggleKind::Top => ui_state.show_top_panel,
             PanelToggleKind::Bottom => ui_state.show_bottom_panel,
         };
         let target = if is_on {
@@ -3869,9 +3762,6 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
             }
             PanelToggleKind::Right => {
                 params.ui_state.show_right_panel = !params.ui_state.show_right_panel;
-            }
-            PanelToggleKind::Top => {
-                params.ui_state.show_top_panel = !params.ui_state.show_top_panel;
             }
             PanelToggleKind::Bottom => {
                 params.ui_state.show_bottom_panel = !params.ui_state.show_bottom_panel;

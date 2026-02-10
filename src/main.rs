@@ -9,7 +9,6 @@ use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
 use bevy::window::{PresentMode, Window, WindowPlugin};
-
 use bevy_feathers::FeathersPlugins;
 use bevy_feathers::dark_theme::create_dark_theme;
 use bevy_feathers::palette;
