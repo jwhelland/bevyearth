@@ -15,6 +15,7 @@ pub mod ground_track;
 pub mod ground_track_gizmo;
 pub mod heatmap;
 pub mod lighting;
+pub mod moon;
 pub mod sky_material;
 
 pub use arrows::draw_city_to_satellite_arrows;
@@ -26,6 +27,7 @@ pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
 pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
 pub use heatmap::{HeatmapConfig, HeatmapPlugin, RangeMode};
 pub use lighting::SunLight;
+pub use moon::MoonPlugin;
 pub use sky_material::SkyMaterialPlugin;
 
 /// Plugin for visualization systems

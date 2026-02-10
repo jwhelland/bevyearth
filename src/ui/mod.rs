@@ -11,7 +11,7 @@ pub mod state;
 pub mod systems;
 
 pub use skybox::SkyboxPlugin;
-pub use state::{RightPanelUI, UIState, UiLayoutState};
+pub use state::{CameraFocusState, RightPanelUI, UIState, UiLayoutState};
 pub use systems::{MainCamera, UiConfigBundle};
 
 /// Plugin for user interface management
@@ -22,6 +22,7 @@ impl Plugin for UiPlugin {
         app.init_resource::<UIState>()
             .init_resource::<UiLayoutState>()
             .init_resource::<RightPanelUI>()
+            .init_resource::<CameraFocusState>()
             .init_resource::<UiConfigBundle>()
             .add_plugins(systems::UiSystemsPlugin);
     }

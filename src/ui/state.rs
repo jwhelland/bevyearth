@@ -60,3 +60,31 @@ pub struct RightPanelUI {
     /// URL of the group whose color is currently being edited (for color picker UI)
     pub editing_group_color: Option<String>,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct CameraPose {
+    pub radius: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraFocusTarget {
+    Earth,
+    Moon,
+}
+
+#[derive(Resource, Debug)]
+pub struct CameraFocusState {
+    pub target: CameraFocusTarget,
+    pub last_earth_pose: Option<CameraPose>,
+}
+
+impl Default for CameraFocusState {
+    fn default() -> Self {
+        Self {
+            target: CameraFocusTarget::Earth,
+            last_earth_pose: None,
+        }
+    }
+}

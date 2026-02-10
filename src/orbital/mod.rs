@@ -5,11 +5,13 @@
 
 use bevy::prelude::*;
 
+pub mod moon;
 pub mod propagation;
 pub mod time;
 
 pub use crate::core::coordinates::{eci_to_ecef_km, gmst_rad_with_dut1};
 use crate::core::space::ecef_to_bevy_km;
+pub use moon::{MoonEcefKm, moon_position_ecef_km};
 pub use propagation::minutes_since_epoch;
 pub use time::{Dut1, SimulationTime, advance_simulation_clock, sun_direction_from_utc};
 
@@ -40,6 +42,11 @@ impl Plugin for OrbitalPlugin {
         app.init_resource::<SimulationTime>()
             .init_resource::<Dut1>()
             .init_resource::<SunDirection>()
-            .add_systems(Update, (advance_simulation_clock, update_sun_direction));
+            .init_resource::<MoonEcefKm>()
+            .add_systems(Update, advance_simulation_clock)
+            .add_systems(
+                Update,
+                (update_sun_direction, moon::update_moon_state).after(advance_simulation_clock),
+            );
     }
 }

@@ -27,7 +27,7 @@ pub fn generate_unified_earth(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    let earth_mesh = generate_icosphere(5); // Subdivision level 5 for ~65k vertices
+    let earth_mesh = generate_icosphere_with_radius(5, EARTH_RADIUS_KM); // Subdivision level 5 for ~65k vertices
     let mesh_handle = meshes.add(earth_mesh);
 
     // Store mesh handle for heatmap access
@@ -66,7 +66,8 @@ pub fn generate_unified_earth(
 /// Generate icosphere mesh with specified subdivision levels
 /// Each subdivision level quadruples the triangle count
 /// Level 5 produces ~65,000 vertices (4^5 * 20 triangles * 3 vertices / triangle)
-pub fn generate_icosphere(subdivisions: u32) -> Mesh {
+/// Generate icosphere mesh at a specific radius (km).
+pub fn generate_icosphere_with_radius(subdivisions: u32, radius_km: f32) -> Mesh {
     // Start with icosahedron vertices (12 vertices)
     let phi = (1.0 + 5.0_f32.sqrt()) / 2.0; // Golden ratio
     let vertices = vec![
@@ -126,7 +127,7 @@ pub fn generate_icosphere(subdivisions: u32) -> Mesh {
 
     for vertex in vertex_positions {
         let normalized = vertex.normalize();
-        final_vertices.push(normalized * EARTH_RADIUS_KM);
+        final_vertices.push(normalized * radius_km);
         // Outward-facing normals for correct PBR lighting.
         normals.push(normalized);
 

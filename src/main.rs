@@ -37,8 +37,8 @@ use space_weather::SpaceWeatherPlugin;
 use tle::TlePlugin;
 use ui::{MainCamera, SkyboxPlugin, UiPlugin, skybox::Cubemap};
 use visualization::{
-    CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, HeatmapPlugin, ShowAxes,
-    SunLight, VisualizationPlugin,
+    CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, HeatmapPlugin,
+    MoonPlugin, ShowAxes, SunLight, VisualizationPlugin,
 };
 
 #[cfg(all(feature = "debug_basic_scene", feature = "debug_scene_camera"))]
@@ -86,7 +86,7 @@ pub fn setup(
         Projection::Perspective(PerspectiveProjection {
             // World units are kilometers; default far plane is too small and clips the Earth/satellites.
             near: 1.0,
-            far: 250_000.0,
+            far: 1_000_000.0,
             ..default()
         }),
         Camera {
@@ -158,7 +158,7 @@ fn setup_basic_scene(
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
             near: 1.0,
-            far: 200_000.0,
+            far: 1_000_000.0,
             ..default()
         }),
         Camera {
@@ -205,7 +205,7 @@ fn setup_debug_scene_camera(
             Camera3d::default(),
             Projection::Perspective(PerspectiveProjection {
                 near: 1.0,
-                far: 250_000.0,
+                far: 1_000_000.0,
                 ..default()
             }),
             Camera {
@@ -263,7 +263,7 @@ fn setup_dev_camera(mut commands: Commands) {
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
             near: 1.0,
-            far: 250_000.0,
+            far: 1_000_000.0,
             ..default()
         }),
         Camera {
@@ -394,6 +394,7 @@ fn main() {
 
         // Add our custom plugins
         app.add_plugins(EarthPlugin);
+        app.add_plugins(MoonPlugin);
         app.add_plugins(CitiesPlugin);
         app.add_plugins(OrbitalPlugin);
         app.add_plugins(SatellitePlugin);

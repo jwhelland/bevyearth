@@ -36,17 +36,23 @@ use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::time::SimulationTime;
+use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
 };
 use crate::space_weather::{AuroraGrid, KpIndex, SolarWind, SpaceWeatherConfig, SpaceWeatherState};
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
-use crate::ui::state::{RightPanelUI, UIState, UiLayoutState};
+use crate::ui::state::{
+    CameraFocusState, CameraFocusTarget, CameraPose, RightPanelUI, UIState, UiLayoutState,
+};
 use crate::visualization::{
     ArrowConfig, GroundTrackConfig, GroundTrackGizmoConfig, HeatmapConfig, RangeMode,
 };
+
+const MOON_FOCUS_DISTANCE_KM: f32 = 10_000.0;
 
 /// Configuration bundle to reduce parameter count
 #[derive(Resource, Default)]
@@ -108,6 +114,9 @@ struct TimeText;
 
 #[derive(Component)]
 struct TimeScaleValueText;
+
+#[derive(Component)]
+struct FocusToggleText;
 
 #[derive(Component)]
 struct HiddenPanelsHintCard;
@@ -226,6 +235,7 @@ enum ButtonAction {
     AddSatellite,
     StopTracking,
     TimeNow,
+    ToggleFocusTarget,
 }
 
 /// Component marker for color preview UI element
@@ -394,6 +404,9 @@ type SliderVisualQuery<'w, 's> = Query<
     With<Slider>,
 >;
 
+type MainCameraQuery<'w, 's> =
+    Query<'w, 's, (&'static mut PanOrbitCamera, &'static mut Transform), With<MainCamera>>;
+
 #[derive(SystemParam)]
 struct SyncWidgetStateParams<'w, 's> {
     store: Res<'w, SatelliteStore>,
@@ -402,6 +415,7 @@ struct SyncWidgetStateParams<'w, 's> {
     config_bundle: Res<'w, UiConfigBundle>,
     heatmap_cfg: Res<'w, HeatmapConfig>,
     space_weather_cfg: Res<'w, SpaceWeatherConfig>,
+    camera_focus: Res<'w, CameraFocusState>,
     selected: Res<'w, SelectedSatellite>,
     sim_time: Res<'w, crate::orbital::SimulationTime>,
     right_ui: Res<'w, RightPanelUI>,
@@ -411,6 +425,7 @@ struct SyncWidgetStateParams<'w, 's> {
     sliders: Query<'w, 's, (Entity, &'static SliderBinding), With<SliderValue>>,
     slider_values: Query<'w, 's, &'static SliderValue>,
     satellite_toggles: Query<'w, 's, (Entity, &'static SatelliteToggle, Option<&'static Checked>)>,
+    focus_toggle_texts: Query<'w, 's, &'static mut bevy::ui::widget::Text, With<FocusToggleText>>,
     commands: Commands<'w, 's>,
 }
 
@@ -424,6 +439,10 @@ struct ButtonActivateParams<'w, 's> {
     selected: ResMut<'w, SelectedSatellite>,
     sim_time: ResMut<'w, crate::orbital::SimulationTime>,
     ui_state: ResMut<'w, UIState>,
+    camera_focus: ResMut<'w, CameraFocusState>,
+    moon_pos: Res<'w, MoonEcefKm>,
+    dut1: Res<'w, Dut1>,
+    q_camera: MainCameraQuery<'w, 's>,
     commands: Commands<'w, 's>,
     fetch_channels: Option<Res<'w, FetchChannels>>,
 }
@@ -495,6 +514,10 @@ impl Plugin for UiSystemsPlugin {
                 PostUpdate,
                 update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
             )
+            .add_systems(
+                PostUpdate,
+                lock_camera_focus_to_target.after(PanOrbitCameraSystemSet),
+            )
             .add_observer(checkbox_self_update)
             .add_observer(slider_self_update)
             .add_observer(handle_button_activate)
@@ -534,6 +557,36 @@ fn enforce_ui_camera_settings(mut cameras: UiCameraQuery<'_, '_>) {
             camera.clear_color = ClearColorConfig::None;
         }
     }
+}
+
+fn lock_camera_focus_to_target(
+    camera_focus: Res<CameraFocusState>,
+    moon_pos: Res<MoonEcefKm>,
+    sim_time: Res<SimulationTime>,
+    dut1: Res<Dut1>,
+    mut q_camera: MainCameraQuery<'_, '_>,
+) {
+    let Ok((mut poc, mut transform)) = q_camera.single_mut() else {
+        return;
+    };
+
+    let focus = match camera_focus.target {
+        CameraFocusTarget::Earth => Vec3::ZERO,
+        CameraFocusTarget::Moon => resolve_moon_focus(&sim_time, &dut1, &moon_pos),
+    };
+
+    poc.focus = focus;
+    let radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
+    let pitch = poc.pitch.unwrap_or(poc.target_pitch);
+    let yaw = poc.yaw.unwrap_or(poc.target_yaw);
+
+    let camera_pos = Vec3::new(
+        radius * pitch.cos() * yaw.sin(),
+        radius * pitch.sin(),
+        radius * pitch.cos() * yaw.cos(),
+    ) + focus;
+    transform.translation = camera_pos;
+    transform.look_at(focus, Vec3::Y);
 }
 
 fn setup_ui_camera(mut commands: Commands) {
@@ -848,6 +901,7 @@ fn setup_ui(
                 Spawn((bevy::ui::widget::Text::new("Show arrows"), ThemedText)),
             ),));
         });
+
     });
 
     // Right panel contents
@@ -1594,6 +1648,7 @@ fn setup_ui(
     commands.entity(top_panel).with_children(|parent| {
         spawn_top_time_row(parent);
         spawn_top_speed_row(parent, sim_time.time_scale);
+        spawn_top_focus_row(parent);
         spawn_top_panel_toggles_row(parent);
     });
 
@@ -2131,6 +2186,55 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
                         "Jumps the simulation clock to the current UTC time.",
                     );
                 });
+        });
+}
+
+fn spawn_top_focus_row(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                width: Val::Px(160.0),
+                flex_grow: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ThemedText,
+        ))
+        .with_children(|row| {
+            row.spawn(Node {
+                width: Val::Px(88.0),
+                flex_grow: 0.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|container| {
+                container
+                    .spawn(button(
+                        ButtonProps::default(),
+                        (
+                            ButtonAction::ToggleFocusTarget,
+                            AutoDirectionalNavigation::default(),
+                        ),
+                        Spawn((
+                            FocusToggleText,
+                            bevy::ui::widget::Text::new("Moon"),
+                            ThemedText,
+                            TextFont {
+                                font_size: 12.0,
+                                ..default()
+                            },
+                        )),
+                    ))
+                    .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
+            });
+            spawn_info_icon_with_tooltip(
+                row,
+                "Focus Moon/Earth. Zoom/orbit stay centered on the active target.",
+            );
         });
 }
 
@@ -3426,6 +3530,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         || params.config_bundle.is_changed()
         || params.heatmap_cfg.is_changed()
         || params.space_weather_cfg.is_changed()
+        || params.camera_focus.is_changed()
         || params.store.is_changed()
         || params.selected.is_changed()
         || params.sim_time.is_changed()
@@ -3563,6 +3668,14 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                 }
             }
         }
+
+        let label = match params.camera_focus.target {
+            CameraFocusTarget::Earth => "Moon",
+            CameraFocusTarget::Moon => "Earth",
+        };
+        for mut text in params.focus_toggle_texts.iter_mut() {
+            text.0 = label.to_string();
+        }
     }
 }
 
@@ -3597,6 +3710,42 @@ fn sync_slider_visuals(
                 text.0 = formatted.clone();
             }
         }
+    }
+}
+
+fn pose_from_camera(camera_pos: Vec3, focus: Vec3) -> CameraPose {
+    let delta = camera_pos - focus;
+    let radius = delta.length().max(1.0);
+    let dir = delta / radius;
+    let pitch = dir.y.asin();
+    let yaw = dir.x.atan2(dir.z);
+    CameraPose { radius, yaw, pitch }
+}
+
+fn apply_pose(poc: &mut PanOrbitCamera, transform: &mut Transform, focus: Vec3, pose: CameraPose) {
+    poc.focus = focus;
+    poc.target_radius = pose.radius;
+    poc.target_pitch = pose.pitch;
+    poc.target_yaw = pose.yaw;
+    poc.radius = Some(pose.radius);
+    poc.pitch = Some(pose.pitch);
+    poc.yaw = Some(pose.yaw);
+    poc.force_update = true;
+
+    let camera_pos = Vec3::new(
+        pose.radius * pose.pitch.cos() * pose.yaw.sin(),
+        pose.radius * pose.pitch.sin(),
+        pose.radius * pose.pitch.cos() * pose.yaw.cos(),
+    ) + focus;
+    transform.translation = camera_pos;
+    transform.look_at(focus, Vec3::Y);
+}
+
+fn resolve_moon_focus(sim_time: &SimulationTime, dut1: &Dut1, moon_pos: &MoonEcefKm) -> Vec3 {
+    if moon_pos.0.length_squared() > 0.0 {
+        ecef_to_bevy_km(moon_pos.0)
+    } else {
+        ecef_to_bevy_km(moon_position_ecef_km(sim_time.current_utc, **dut1))
     }
 }
 
@@ -3645,6 +3794,43 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
             ButtonAction::TimeNow => {
                 params.sim_time.current_utc = chrono::Utc::now();
                 params.sim_time.time_scale = 1.0;
+            }
+            ButtonAction::ToggleFocusTarget => {
+                if let Ok((mut poc, mut cam_transform)) = params.q_camera.single_mut() {
+                    let current_pos = cam_transform.translation;
+                    match params.camera_focus.target {
+                        CameraFocusTarget::Earth => {
+                            params.selected.tracking = None;
+                            params.camera_focus.last_earth_pose =
+                                Some(pose_from_camera(current_pos, Vec3::ZERO));
+
+                            let moon_focus = resolve_moon_focus(
+                                &params.sim_time,
+                                &params.dut1,
+                                &params.moon_pos,
+                            );
+                            let moon_dir = moon_focus.normalize_or_zero();
+                            let focus_dir = if moon_dir.length_squared() > 0.0 {
+                                moon_dir
+                            } else {
+                                Vec3::Z
+                            };
+                            let camera_pos = moon_focus + focus_dir * MOON_FOCUS_DISTANCE_KM;
+                            let pose = pose_from_camera(camera_pos, moon_focus);
+                            apply_pose(&mut poc, &mut cam_transform, moon_focus, pose);
+                            params.camera_focus.target = CameraFocusTarget::Moon;
+                        }
+                        CameraFocusTarget::Moon => {
+                            let pose = params.camera_focus.last_earth_pose.unwrap_or(CameraPose {
+                                radius: 25_000.0,
+                                yaw: 0.0,
+                                pitch: 0.0,
+                            });
+                            apply_pose(&mut poc, &mut cam_transform, Vec3::ZERO, pose);
+                            params.camera_focus.target = CameraFocusTarget::Earth;
+                        }
+                    }
+                }
             }
         }
     }
