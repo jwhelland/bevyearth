@@ -9,16 +9,14 @@ pub mod components;
 pub mod resources;
 pub mod systems;
 
-pub use components::{
-    Propagator, PropagationError, Satellite, SatelliteColor, SatelliteName, TleComponent,
-};
+pub use components::{Satellite, SatelliteColor};
 pub use resources::{
-    ColorHueCounter, GroupMaterialCache, NoradIndex, OrbitTrailConfig, SatEntry,
-    SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
+    ColorHueCounter, GroupMaterialCache, NoradIndex, OrbitTrailConfig, SatelliteRenderConfig,
+    SelectedSatellite,
 };
 pub use systems::{
-    draw_orbit_trails_system, init_satellite_render_assets, move_camera_to_satellite,
-    propagate_satellites_system, satellite_click_system, spawn_missing_satellite_entities_system,
+    draw_orbit_trails_system, init_satellite_render_assets, materialize_satellite_entities_system,
+    move_camera_to_satellite, propagate_satellites_system, satellite_click_system,
     track_satellite_continuously, update_group_colors_system, update_orbit_trails_system,
     update_satellite_rendering_system,
 };
@@ -28,8 +26,7 @@ pub struct SatellitePlugin;
 
 impl Plugin for SatellitePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SatelliteStore>()
-            .init_resource::<SelectedSatellite>()
+        app.init_resource::<SelectedSatellite>()
             .init_resource::<GroupMaterialCache>()
             .init_resource::<NoradIndex>()
             .init_resource::<ColorHueCounter>()
@@ -39,8 +36,8 @@ impl Plugin for SatellitePlugin {
             .add_systems(
                 Update,
                 (
-                    spawn_missing_satellite_entities_system,
-                    propagate_satellites_system.after(spawn_missing_satellite_entities_system),
+                    materialize_satellite_entities_system,
+                    propagate_satellites_system.after(materialize_satellite_entities_system),
                     update_orbit_trails_system.after(propagate_satellites_system),
                     draw_orbit_trails_system.after(update_orbit_trails_system),
                     update_satellite_rendering_system,
@@ -50,6 +47,5 @@ impl Plugin for SatellitePlugin {
                     satellite_click_system,
                 ),
             );
-        // TODO Phase 3: Add observer for automatic NoradIndex cleanup on entity despawn
     }
 }

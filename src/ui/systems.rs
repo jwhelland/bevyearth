@@ -38,11 +38,12 @@ use std::collections::HashMap;
 use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::time::SimulationTime;
 use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
-use crate::satellite::components::{NoradId, Propagator, Satellite, SatelliteFlags, SatelliteName};
-use crate::satellite::resources::NoradIndex;
-use crate::satellite::{
-    OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
+use crate::satellite::components::{
+    NoradId, PropagationError, Propagator, Satellite, SatelliteColor, SatelliteFlags,
+    SatelliteGroupUrl, SatelliteName, TleComponent,
 };
+use crate::satellite::resources::NoradIndex;
+use crate::satellite::{OrbitTrailConfig, SatelliteRenderConfig, SelectedSatellite};
 use crate::space_weather::{AuroraGrid, KpIndex, SolarWind, SpaceWeatherConfig, SpaceWeatherState};
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
@@ -394,7 +395,6 @@ type MainCameraQuery<'w, 's> =
 
 #[derive(SystemParam)]
 struct SyncWidgetStateParams<'w, 's> {
-    store: Res<'w, SatelliteStore>,
     ui_state: Res<'w, UIState>,
     arrows: Res<'w, ArrowConfig>,
     config_bundle: Res<'w, UiConfigBundle>,
@@ -412,8 +412,11 @@ struct SyncWidgetStateParams<'w, 's> {
     satellite_toggles: Query<'w, 's, (Entity, &'static SatelliteToggle, Option<&'static Checked>)>,
     focus_toggle_texts: Query<'w, 's, &'static mut bevy::ui::widget::Text, With<FocusToggleText>>,
     commands: Commands<'w, 's>,
-    // New: query for satellite flags and components
-    satellites: Query<'w, 's, (&'static SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
+    // ECS query for satellite flags and components
+    satellites:
+        Query<'w, 's, (&'static SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
+    norad_index: Res<'w, NoradIndex>,
+    sat_flags: Query<'w, 's, &'static SatelliteFlags, With<Satellite>>,
 }
 
 #[derive(SystemParam)]
@@ -422,7 +425,8 @@ struct ButtonActivateParams<'w, 's> {
     q_sat_action: Query<'w, 's, &'static SatelliteActionButton>,
     q_panel_toggle: Query<'w, 's, &'static PanelToggle>,
     right_ui: ResMut<'w, RightPanelUI>,
-    store: ResMut<'w, SatelliteStore>,
+    norad_index: ResMut<'w, NoradIndex>,
+    all_satellites: Query<'w, 's, Entity, With<Satellite>>,
     selected: ResMut<'w, SelectedSatellite>,
     sim_time: ResMut<'w, crate::orbital::SimulationTime>,
     ui_state: ResMut<'w, UIState>,
@@ -443,9 +447,9 @@ struct CheckboxChangeParams<'w, 's> {
     config_bundle: ResMut<'w, UiConfigBundle>,
     heatmap_cfg: ResMut<'w, HeatmapConfig>,
     space_weather_cfg: ResMut<'w, SpaceWeatherConfig>,
-    store: ResMut<'w, SatelliteStore>,
-    // New: query for satellite flags and components
-    satellites: Query<'w, 's, (&'static mut SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
+    // ECS query for satellite flags and components
+    satellites:
+        Query<'w, 's, (&'static mut SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
     norad_index: Res<'w, NoradIndex>,
 }
 
@@ -2824,24 +2828,19 @@ fn update_time_display(
     }
 }
 
-fn desired_satellite_list_width(store: &SatelliteStore) -> f32 {
+fn desired_satellite_list_width(names: &Query<&SatelliteName, With<Satellite>>) -> f32 {
     let mut max_chars = 0usize;
-    for entry in store.items.values() {
-        let name = entry.name.as_deref().unwrap_or("Unnamed");
-        max_chars = max_chars.max(name.chars().count());
+    for name in names.iter() {
+        max_chars = max_chars.max(name.0.chars().count());
     }
     SATELLITE_LIST_FIXED_WIDTH_PX + (max_chars as f32 * SATELLITE_LIST_NAME_CHAR_PX)
 }
 
 fn update_satellite_list_panel_width(
-    store: Res<SatelliteStore>,
+    names: Query<&SatelliteName, With<Satellite>>,
     mut layout: ResMut<UiLayoutState>,
     sections: Query<&Node, With<SatellitesListSection>>,
 ) {
-    if !store.is_changed() {
-        return;
-    }
-
     let Ok(node) = sections.single() else {
         return;
     };
@@ -2850,7 +2849,7 @@ fn update_satellite_list_panel_width(
         return;
     }
 
-    let target = desired_satellite_list_width(&store)
+    let target = desired_satellite_list_width(&names)
         .clamp(layout.right_panel_min_px, layout.right_panel_max_px);
     if layout.right_panel_width_px < target {
         layout.right_panel_width_px = target;
@@ -3088,8 +3087,9 @@ fn sync_panel_toggle_buttons(
 
 fn process_pending_add(
     mut right_ui: ResMut<RightPanelUI>,
-    mut store: ResMut<SatelliteStore>,
+    mut norad_index: ResMut<NoradIndex>,
     fetch_channels: Option<Res<FetchChannels>>,
+    mut commands: Commands,
 ) {
     if !right_ui.pending_add {
         return;
@@ -3105,7 +3105,7 @@ fn process_pending_add(
         }
     };
 
-    if store.items.contains_key(&norad) {
+    if norad_index.map.contains_key(&norad) {
         right_ui.error = Some("Satellite already added".to_string());
         return;
     }
@@ -3116,22 +3116,17 @@ fn process_pending_add(
     let light = (0.55 + ((norad % 11) as f32) * 0.02).clamp(0.5, 0.8);
     let color = Color::hsl(hue, sat, light);
 
-    // Insert entry; spawn_missing_satellite_entities_system will create the entity
-    store.items.insert(
-        norad,
-        crate::satellite::SatEntry {
-            name: None,
-            color,
-            entity: None,
-            tle: None,
-            propagator: None,
-            error: None,
-            show_ground_track: false,
-            show_trail: false,
-            is_clicked: false,
-            group_url: None,
-        },
-    );
+    // Spawn data-only entity; materialize system will add rendering components
+    let entity = commands
+        .spawn((
+            Satellite,
+            NoradId(norad),
+            SatelliteColor(color),
+            SatelliteFlags::default(),
+        ))
+        .id();
+    norad_index.map.insert(norad, entity);
+
     right_ui.error = None;
     if let Some(fetch) = fetch_channels {
         if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
@@ -3159,7 +3154,17 @@ struct SatelliteRowRefs {
 }
 
 fn update_satellite_list(
-    store: Res<SatelliteStore>,
+    sat_query: Query<
+        (
+            &NoradId,
+            Option<&SatelliteName>,
+            &SatelliteFlags,
+            Option<&Propagator>,
+            Option<&PropagationError>,
+            Option<&TleComponent>,
+        ),
+        With<Satellite>,
+    >,
     selected: Res<SelectedSatellite>,
     ui_entities: Res<UiEntities>,
     row_query: Query<(Entity, &SatelliteRow, &SatelliteRowRefs)>,
@@ -3167,89 +3172,87 @@ fn update_satellite_list(
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    if !store.is_changed() && !selected.is_changed() {
-        return;
-    }
-
     let mut existing_rows: std::collections::HashMap<u32, (Entity, &SatelliteRowRefs)> = row_query
         .iter()
         .map(|(e, r, refs)| (r.norad, (e, refs)))
         .collect();
 
-    let mut keys: Vec<u32> = store.items.keys().copied().collect();
-    keys.sort_unstable();
+    // Collect and sort by NORAD ID
+    let mut sat_data: Vec<_> = sat_query.iter().collect();
+    sat_data.sort_by_key(|(norad, ..)| norad.0);
 
     let parent = ui_entities.satellite_list;
 
-    for norad in keys {
-        if let Some(entry) = store.items.get(&norad) {
-            let is_tracking = selected.tracking == Some(norad);
-            let (status_text, status_color) = if entry.error.is_some() {
-                ("Error", Color::srgb(1.0, 0.2, 0.2))
-            } else if entry.propagator.is_some() {
-                ("Ready", Color::srgb(0.2, 0.9, 0.2))
-            } else if entry.tle.is_some() {
-                ("TLE", Color::srgb(0.9, 0.9, 0.2))
-            } else {
-                ("Fetching", Color::srgb(0.7, 0.7, 0.7))
-            };
+    for (norad_id, name_opt, flags, propagator_opt, error_opt, tle_opt) in sat_data.iter() {
+        let norad = norad_id.0;
+        let is_tracking = selected.tracking == Some(norad);
+        let (status_text, status_color) = if error_opt.is_some() {
+            ("Error", Color::srgb(1.0, 0.2, 0.2))
+        } else if propagator_opt.is_some() {
+            ("Ready", Color::srgb(0.2, 0.9, 0.2))
+        } else if tle_opt.is_some() {
+            ("TLE", Color::srgb(0.9, 0.9, 0.2))
+        } else {
+            ("Fetching", Color::srgb(0.7, 0.7, 0.7))
+        };
 
-            if let Some((_, refs)) = existing_rows.remove(&norad) {
-                // Find and update track button text
-                if let Ok(btn_children) = children.get(refs.track_btn) {
-                    for child in btn_children.iter() {
-                        if let Ok((mut text, _)) = texts.get_mut(child) {
-                            let label = if is_tracking {
-                                format!("> {norad}")
-                            } else {
-                                norad.to_string()
-                            };
-                            if text.0 != label {
-                                text.0 = label;
-                            }
+        let name_str = name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed");
+
+        if let Some((_, refs)) = existing_rows.remove(&norad) {
+            // Find and update track button text
+            if let Ok(btn_children) = children.get(refs.track_btn) {
+                for child in btn_children.iter() {
+                    if let Ok((mut text, _)) = texts.get_mut(child) {
+                        let label = if is_tracking {
+                            format!("> {norad}")
+                        } else {
+                            norad.to_string()
+                        };
+                        if text.0 != label {
+                            text.0 = label;
                         }
                     }
                 }
-
-                if let Ok((mut text, _)) = texts.get_mut(refs.name_text) {
-                    let name = entry.name.as_deref().unwrap_or("Unnamed");
-                    if text.0 != name {
-                        text.0 = name.to_string();
-                    }
-                }
-
-                if let Ok((mut text, mut color_opt)) = texts.get_mut(refs.status_text) {
-                    if text.0 != status_text {
-                        text.0 = status_text.to_string();
-                    }
-                    if let Some(ref mut color) = color_opt {
-                        color.0 = status_color;
-                    }
-                }
-
-                if entry.show_ground_track {
-                    commands.entity(refs.ground_track_chk).insert(Checked);
-                } else {
-                    commands.entity(refs.ground_track_chk).remove::<Checked>();
-                }
-
-                if entry.show_trail {
-                    commands.entity(refs.trail_chk).insert(Checked);
-                } else {
-                    commands.entity(refs.trail_chk).remove::<Checked>();
-                }
-            } else {
-                commands.entity(parent).with_children(|parent| {
-                    spawn_satellite_row(
-                        parent,
-                        norad,
-                        entry,
-                        is_tracking,
-                        status_text,
-                        status_color,
-                    );
-                });
             }
+
+            if let Ok((mut text, _)) = texts.get_mut(refs.name_text) {
+                if text.0 != name_str {
+                    text.0 = name_str.to_string();
+                }
+            }
+
+            if let Ok((mut text, mut color_opt)) = texts.get_mut(refs.status_text) {
+                if text.0 != status_text {
+                    text.0 = status_text.to_string();
+                }
+                if let Some(ref mut color) = color_opt {
+                    color.0 = status_color;
+                }
+            }
+
+            if flags.show_ground_track {
+                commands.entity(refs.ground_track_chk).insert(Checked);
+            } else {
+                commands.entity(refs.ground_track_chk).remove::<Checked>();
+            }
+
+            if flags.show_trail {
+                commands.entity(refs.trail_chk).insert(Checked);
+            } else {
+                commands.entity(refs.trail_chk).remove::<Checked>();
+            }
+        } else {
+            commands.entity(parent).with_children(|parent| {
+                spawn_satellite_row(
+                    parent,
+                    norad,
+                    name_str,
+                    flags,
+                    is_tracking,
+                    status_text,
+                    status_color,
+                );
+            });
         }
     }
 
@@ -3263,7 +3266,8 @@ fn update_satellite_list(
 fn spawn_satellite_row(
     parent: &mut ChildSpawnerCommands,
     norad: u32,
-    entry: &crate::satellite::SatEntry,
+    name: &str,
+    flags: &SatelliteFlags,
     is_tracking: bool,
     status_text: &str,
     status_color: Color,
@@ -3329,7 +3333,7 @@ fn spawn_satellite_row(
 
             name_text = row
                 .spawn((
-                    bevy::ui::widget::Text::new(entry.name.as_deref().unwrap_or("Unnamed")),
+                    bevy::ui::widget::Text::new(name),
                     ThemedText,
                     Node {
                         flex_grow: 1.0,
@@ -3369,7 +3373,7 @@ fn spawn_satellite_row(
                     ),
                     Spawn((bevy::ui::widget::Text::new(""), ThemedText)),
                 ),));
-                if entry.show_ground_track {
+                if flags.show_ground_track {
                     cb.insert(Checked);
                 }
                 ground_track_chk = cb.id();
@@ -3393,7 +3397,7 @@ fn spawn_satellite_row(
                     ),
                     Spawn((bevy::ui::widget::Text::new(""), ThemedText)),
                 ),));
-                if entry.show_trail {
+                if flags.show_trail {
                     cb.insert(Checked);
                 }
                 trail_chk = cb.id();
@@ -3439,7 +3443,6 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         || params.heatmap_cfg.is_changed()
         || params.space_weather_cfg.is_changed()
         || params.camera_focus.is_changed()
-        || params.store.is_changed()
         || params.selected.is_changed()
         || params.sim_time.is_changed()
         || params.right_ui.is_changed()
@@ -3463,7 +3466,9 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                             .filter(|(_, p)| p.is_some())
                             .collect();
                     !satellites_with_propagator.is_empty()
-                        && satellites_with_propagator.iter().all(|(flags, _)| flags.show_trail)
+                        && satellites_with_propagator
+                            .iter()
+                            .all(|(flags, _)| flags.show_trail)
                 }
                 CheckboxBinding::TracksAll => {
                     let satellites_with_propagator: Vec<(&SatelliteFlags, Option<&Propagator>)> =
@@ -3564,10 +3569,12 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         }
 
         for (entity, toggle, checked) in params.satellite_toggles.iter_mut() {
-            if let Some(entry) = params.store.items.get(&toggle.norad) {
+            if let Some(&sat_entity) = params.norad_index.map.get(&toggle.norad)
+                && let Ok(flags) = params.sat_flags.get(sat_entity)
+            {
                 let should_check = match toggle.kind {
-                    SatelliteToggleKind::GroundTrack => entry.show_ground_track,
-                    SatelliteToggleKind::Trail => entry.show_trail,
+                    SatelliteToggleKind::GroundTrack => flags.show_ground_track,
+                    SatelliteToggleKind::Trail => flags.show_trail,
                 };
                 match (should_check, checked.is_some()) {
                     (true, false) => {
@@ -3687,13 +3694,11 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                 }
             }
             ButtonAction::ClearAll => {
-                for entry in params.store.items.values_mut() {
-                    if let Some(entity) = entry.entity.take() {
-                        params.commands.entity(entity).despawn_children();
-                        params.commands.entity(entity).despawn();
-                    }
+                for entity in params.all_satellites.iter() {
+                    params.commands.entity(entity).despawn_children();
+                    params.commands.entity(entity).despawn();
                 }
-                params.store.items.clear();
+                params.norad_index.map.clear();
                 params.right_ui.error = None;
                 params.selected.tracking = None;
             }
@@ -3758,9 +3763,7 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                 }
             }
             SatelliteAction::Remove => {
-                if let Some(entry) = params.store.items.remove(&action.norad)
-                    && let Some(entity) = entry.entity
-                {
+                if let Some(entity) = params.norad_index.map.remove(&action.norad) {
                     params.commands.entity(entity).despawn_children();
                     params.commands.entity(entity).despawn();
                 }
@@ -3794,7 +3797,7 @@ fn handle_section_toggle(
     q_toggle: Query<&SectionToggle>,
     mut nodes: Query<&mut Node>,
     sat_list_sections: Query<(), With<SatellitesListSection>>,
-    store: Res<SatelliteStore>,
+    names: Query<&SatelliteName, With<Satellite>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
     let Ok(toggle) = q_toggle.get(ev.entity) else {
@@ -3809,7 +3812,7 @@ fn handle_section_toggle(
         node.display = new_display;
 
         if new_display == Display::Flex && sat_list_sections.contains(toggle.body) {
-            let target = desired_satellite_list_width(&store)
+            let target = desired_satellite_list_width(&names)
                 .clamp(layout.right_panel_min_px, layout.right_panel_max_px);
             if layout.right_panel_width_px < target {
                 layout.right_panel_width_px = target;
@@ -3836,23 +3839,11 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
                         flags.show_trail = ev.value;
                     }
                 }
-                // Also update store for consistency during migration
-                for entry in params.store.items.values_mut() {
-                    if entry.propagator.is_some() {
-                        entry.show_trail = ev.value;
-                    }
-                }
             }
             CheckboxBinding::TracksAll => {
                 for (mut flags, propagator_opt) in params.satellites.iter_mut() {
                     if propagator_opt.is_some() {
                         flags.show_ground_track = ev.value;
-                    }
-                }
-                // Also update store for consistency during migration
-                for entry in params.store.items.values_mut() {
-                    if entry.propagator.is_some() {
-                        entry.show_ground_track = ev.value;
                     }
                 }
             }
@@ -4378,8 +4369,8 @@ fn manage_color_picker_system(
 
 fn update_group_list_visuals(
     right_ui: Res<RightPanelUI>,
-    store: Res<SatelliteStore>,
     group_registry: Res<crate::satellite::resources::GroupRegistry>,
+    group_urls: Query<&SatelliteGroupUrl, With<Satellite>>,
     mut swatches: Query<(&GroupColorSwatch, &mut BackgroundColor, &mut BorderColor)>,
     mut status_texts: Query<(
         &GroupLoadedText,
@@ -4387,15 +4378,13 @@ fn update_group_list_visuals(
         &mut TextColor,
     )>,
 ) {
-    if !right_ui.is_changed() && !store.is_changed() && !group_registry.is_changed() {
+    if !right_ui.is_changed() && !group_registry.is_changed() {
         return;
     }
 
     let mut counts: HashMap<&str, usize> = HashMap::new();
-    for entry in store.items.values() {
-        if let Some(group_url) = entry.group_url.as_deref() {
-            *counts.entry(group_url).or_default() += 1;
-        }
+    for group_url in group_urls.iter() {
+        *counts.entry(group_url.0.as_str()).or_default() += 1;
     }
 
     let active_group = right_ui.editing_group_color.as_deref();

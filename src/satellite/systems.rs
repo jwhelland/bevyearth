@@ -6,16 +6,13 @@ use crate::orbital::{
     Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
 use crate::satellite::components::{
-    NoradId, OrbitTrail, Propagator, PropagationError, Satellite, SatelliteColor, SatelliteFlags,
-    SatelliteGroupUrl, SatelliteName, TleComponent, TrailPoint,
+    NoradId, OrbitTrail, Propagator, Satellite, SatelliteColor, SatelliteFlags, SatelliteGroupUrl,
+    SatelliteName, TleComponent, TrailPoint,
 };
 use crate::satellite::resources::{
-    GroupMaterialCache, GroupRegistry, NoradIndex, SatelliteRenderAssets, SatelliteStore,
-    SelectedSatellite,
+    GroupMaterialCache, GroupRegistry, NoradIndex, SatelliteRenderAssets, SelectedSatellite,
 };
-use crate::tle::TleData;
 use bevy::color::LinearRgba;
-use bevy::ecs::world::EntityWorldMut;
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -78,182 +75,61 @@ pub fn propagate_satellites_system(
     }
 }
 
-/// System to spawn entities for satellites that don't have them yet (e.g., from group loading)
-pub fn spawn_missing_satellite_entities_system(
-    mut store: ResMut<SatelliteStore>,
-    mut norad_index: ResMut<NoradIndex>,
+/// System to add rendering components (mesh, material, transform) to satellite
+/// entities that don't have them yet. Entities are spawned as data-only by the
+/// TLE processing system; this system "materializes" them for rendering.
+pub fn materialize_satellite_entities_system(
+    unmaterialized: Query<
+        (
+            Entity,
+            &NoradId,
+            &SatelliteColor,
+            Option<&SatelliteGroupUrl>,
+        ),
+        (With<Satellite>, Without<Mesh3d>),
+    >,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     render_assets: Res<SatelliteRenderAssets>,
     mut group_materials: ResMut<GroupMaterialCache>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
 ) {
-    let mut group_spawn_ids = Vec::new();
-    let mut solo_spawn_ids = Vec::new();
+    let sphere_radius = config_bundle.render_cfg.sphere_radius;
+    let emissive_intensity = config_bundle.render_cfg.emissive_intensity;
 
-    // Collect satellites that need entities
-    for (norad, entry) in store.items.iter() {
-        if entry.entity.is_none() {
-            if entry.group_url.is_some() {
-                group_spawn_ids.push(*norad);
+    for (entity, norad_id, color, group_url_opt) in unmaterialized.iter() {
+        let material_handle = if let Some(group_url) = group_url_opt {
+            // Reuse or create shared group material
+            if let Some(handle) = group_materials.materials.get(&group_url.0) {
+                handle.clone()
             } else {
-                solo_spawn_ids.push(*norad);
+                let handle = materials.add(StandardMaterial {
+                    base_color: color.0,
+                    emissive: LinearRgba::from(color.0) * emissive_scale(emissive_intensity),
+                    ..Default::default()
+                });
+                group_materials
+                    .materials
+                    .insert(group_url.0.clone(), handle.clone());
+                handle
             }
-        }
-    }
-
-    if !group_spawn_ids.is_empty() {
-        group_spawn_ids.sort_unstable();
-        let mut bundles = Vec::with_capacity(group_spawn_ids.len());
-        let mesh_handle = render_assets.sphere_mesh.clone();
-        let sphere_radius = config_bundle.render_cfg.sphere_radius;
-        let emissive_intensity = config_bundle.render_cfg.emissive_intensity;
-
-        for norad in group_spawn_ids.iter() {
-            if let Some(entry) = store.items.get(norad) {
-                let group_url = entry
-                    .group_url
-                    .as_ref()
-                    .expect("group_url should be present for group spawn");
-                let material_handle = if let Some(handle) = group_materials.materials.get(group_url)
-                {
-                    handle.clone()
-                } else {
-                    let handle = materials.add(StandardMaterial {
-                        base_color: entry.color,
-                        emissive: LinearRgba::from(entry.color)
-                            * emissive_scale(emissive_intensity),
-                        ..Default::default()
-                    });
-                    group_materials
-                        .materials
-                        .insert(group_url.clone(), handle.clone());
-                    handle
-                };
-
-                bundles.push((
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d(material_handle),
-                    NoradId(*norad),
-                    Satellite,
-                    SatelliteColor(entry.color),
-                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                        .with_scale(Vec3::splat(sphere_radius)),
-                    Visibility::Visible,
-                    Name::new(format!("Satellite {norad}")),
-                    SatelliteFlags {
-                        show_ground_track: entry.show_ground_track,
-                        show_trail: entry.show_trail,
-                        is_clicked: entry.is_clicked,
-                    },
-                ));
-            }
-        }
-
-        let group_ids = group_spawn_ids.clone();
-        let batch_count = group_ids.len();
-        commands.queue(move |world: &mut World| {
-            let entities: Vec<Entity> = world.spawn_batch(bundles).collect();
-
-            // Collect data from store before mutably borrowing world for entities
-            let mut entity_data: Vec<(u32, Entity, Option<String>, Option<TleData>, Option<sgp4::Constants>, Option<String>, Option<String>)> = Vec::new();
-            {
-                let mut store = world.resource_mut::<SatelliteStore>();
-                for (norad, entity) in group_ids.iter().zip(entities.iter()) {
-                    if let Some(entry) = store.items.get_mut(norad) {
-                        entry.entity = Some(*entity);
-                        entity_data.push((
-                            *norad,
-                            *entity,
-                            entry.name.clone(),
-                            entry.tle.clone(),
-                            entry.propagator.clone(),
-                            entry.error.clone(),
-                            entry.group_url.clone(),
-                        ));
-                    }
-                }
-            }
-
-            // Now add components to entities
-            for (norad, entity, name, tle, propagator, error, group_url) in entity_data {
-                let mut entity_mut: EntityWorldMut = world.entity_mut(entity);
-                if let Some(name) = name {
-                    entity_mut.insert(SatelliteName(name));
-                }
-                if let Some(tle) = tle {
-                    entity_mut.insert(TleComponent(tle));
-                }
-                if let Some(propagator) = propagator {
-                    entity_mut.insert(Propagator(propagator));
-                }
-                if let Some(error) = error {
-                    entity_mut.insert(PropagationError(error));
-                }
-                if let Some(group_url) = group_url {
-                    entity_mut.insert(SatelliteGroupUrl(group_url));
-                }
-
-                // Update NoradIndex
-                world.resource_mut::<NoradIndex>().map.insert(norad, entity);
-            }
-
-            info!(
-                "Spawned {} group satellites via spawn_batch",
-                batch_count
-            );
-        });
-    }
-
-    // Spawn entities for non-group satellites individually.
-    solo_spawn_ids.sort_unstable();
-    for norad in solo_spawn_ids {
-        if let Some(entry) = store.items.get_mut(&norad) {
-            let material_handle = materials.add(StandardMaterial {
-                base_color: entry.color,
-                emissive: LinearRgba::from(entry.color)
-                    * emissive_scale(config_bundle.render_cfg.emissive_intensity),
+        } else {
+            // Individual material
+            materials.add(StandardMaterial {
+                base_color: color.0,
+                emissive: LinearRgba::from(color.0) * emissive_scale(emissive_intensity),
                 ..Default::default()
-            });
+            })
+        };
 
-            let mut entity_commands = commands.spawn((
-                Mesh3d(render_assets.sphere_mesh.clone()),
-                MeshMaterial3d(material_handle),
-                NoradId(norad),
-                Satellite,
-                SatelliteColor(entry.color),
-                Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                    .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
-                Visibility::Visible,
-                Name::new(format!("Satellite {norad}")),
-                SatelliteFlags {
-                    show_ground_track: entry.show_ground_track,
-                    show_trail: entry.show_trail,
-                    is_clicked: entry.is_clicked,
-                },
-            ));
-
-            // Add optional components
-            if let Some(name) = &entry.name {
-                entity_commands.insert(SatelliteName(name.clone()));
-            }
-            if let Some(tle) = &entry.tle {
-                entity_commands.insert(TleComponent(tle.clone()));
-            }
-            if let Some(propagator) = &entry.propagator {
-                entity_commands.insert(Propagator(propagator.clone()));
-            }
-            if let Some(error) = &entry.error {
-                entity_commands.insert(PropagationError(error.clone()));
-            }
-            if let Some(group_url) = &entry.group_url {
-                entity_commands.insert(SatelliteGroupUrl(group_url.clone()));
-            }
-
-            let entity = entity_commands.id();
-            entry.entity = Some(entity);
-            norad_index.map.insert(norad, entity);
-        }
+        commands.entity(entity).insert((
+            Mesh3d(render_assets.sphere_mesh.clone()),
+            MeshMaterial3d(material_handle),
+            Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
+                .with_scale(Vec3::splat(sphere_radius)),
+            Visibility::Visible,
+            Name::new(format!("Satellite {}", norad_id.0)),
+        ));
     }
 }
 
@@ -262,7 +138,10 @@ pub fn update_orbit_trails_system(
     sim_time: Res<SimulationTime>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, &SatelliteFlags), With<Satellite>>,
-    satellites_without_trail: Query<(Entity, &SatelliteFlags), (With<Satellite>, Without<OrbitTrail>)>,
+    satellites_without_trail: Query<
+        (Entity, &SatelliteFlags),
+        (With<Satellite>, Without<OrbitTrail>),
+    >,
     mut commands: Commands,
 ) {
     let current_time = sim_time.current_utc;
@@ -517,7 +396,6 @@ pub fn satellite_click_system(
 /// System to update satellite rendering properties when config changes
 pub fn update_satellite_rendering_system(
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    _store: Res<SatelliteStore>,
     mut satellite_query: Query<(&mut Transform, &SatelliteColor, Entity), With<Satellite>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
@@ -556,9 +434,8 @@ pub fn update_satellite_rendering_system(
 /// and updates the color of all satellites belonging to the modified group.
 pub fn update_group_colors_system(
     group_registry: Option<Res<GroupRegistry>>,
-    mut store: ResMut<SatelliteStore>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    mut satellite_query: Query<(&NoradId, &mut SatelliteColor, Entity), With<Satellite>>,
+    mut satellite_query: Query<(&mut SatelliteColor, &SatelliteGroupUrl, Entity), With<Satellite>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     group_materials: Res<GroupMaterialCache>,
@@ -583,26 +460,18 @@ pub fn update_group_colors_system(
     }
 
     // Update colors for satellites that belong to groups
-    for (norad_id, mut satellite_color, entity) in satellite_query.iter_mut() {
-        if let Some(entry) = store.items.get_mut(&norad_id.0) {
-            // Check if this satellite belongs to a group
-            if let Some(group_url) = &entry.group_url {
-                // Look up the group's current color
-                if let Some(group) = registry.groups.get(group_url) {
-                    // Update the color in all relevant places
-                    entry.color = group.color;
-                    satellite_color.0 = group.color;
+    for (mut satellite_color, group_url, entity) in satellite_query.iter_mut() {
+        if let Some(group) = registry.groups.get(&group_url.0) {
+            satellite_color.0 = group.color;
 
-                    // Update the material
-                    if !group_materials.materials.contains_key(group_url)
-                        && let Ok(material_handle) = material_query.get(entity)
-                        && let Some(material) = materials.get_mut(&material_handle.0)
-                    {
-                        material.base_color = group.color;
-                        material.emissive = LinearRgba::from(group.color)
-                            * emissive_scale(config_bundle.render_cfg.emissive_intensity);
-                    }
-                }
+            // Update the material for non-group-cached satellites
+            if !group_materials.materials.contains_key(&group_url.0)
+                && let Ok(material_handle) = material_query.get(entity)
+                && let Some(material) = materials.get_mut(&material_handle.0)
+            {
+                material.base_color = group.color;
+                material.emissive = LinearRgba::from(group.color)
+                    * emissive_scale(config_bundle.render_cfg.emissive_intensity);
             }
         }
     }

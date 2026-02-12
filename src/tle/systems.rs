@@ -1,22 +1,29 @@
 //! TLE processing systems
 
-use crate::satellite::resources::{GroupRegistry, NoradIndex};
-use crate::satellite::{
-    Propagator, PropagationError, SatelliteName, SatelliteStore, TleComponent,
+use crate::satellite::components::{
+    NoradId, PropagationError, Propagator, Satellite, SatelliteColor, SatelliteFlags,
+    SatelliteGroupUrl, SatelliteName, TleComponent,
 };
+use crate::satellite::resources::{ColorHueCounter, GroupRegistry, NoradIndex};
 use crate::tle::parser::parse_tle_epoch_to_utc;
 use crate::tle::types::{FetchChannels, FetchResultMsg, TleData};
 use crate::ui::state::RightPanelUI;
 use bevy::prelude::*;
 
-/// System to drain fetch results and build SGP4 propagators
+/// System to drain fetch results and build SGP4 propagators.
+///
+/// When a new satellite arrives, this system spawns a data-only entity
+/// (no mesh/material). The `materialize_satellite_entities_system` adds
+/// rendering components on the next frame.
 pub fn process_fetch_results_system(
-    mut store: ResMut<SatelliteStore>,
+    mut norad_index: ResMut<NoradIndex>,
+    mut color_hue: ResMut<ColorHueCounter>,
     mut right_ui: ResMut<RightPanelUI>,
     group_registry: Option<Res<GroupRegistry>>,
-    norad_index: Option<Res<NoradIndex>>,
     fetch: Option<Res<FetchChannels>>,
     mut commands: Commands,
+    // Queries for updating existing satellite entities
+    mut sat_query: Query<(&mut SatelliteColor, Option<&mut SatelliteName>), With<Satellite>>,
 ) {
     let Some(fetch) = fetch else { return };
     let Ok(guard) = fetch.res_rx.lock() else {
@@ -32,134 +39,82 @@ pub fn process_fetch_results_system(
                 epoch_utc,
                 group,
             } => {
-                if let Some(s) = store.items.get_mut(&norad) {
-                    // clear previous error
-                    s.error = None;
-                    s.name = name.or_else(|| Some(format!("NORAD {}", norad)));
-                    let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
-                    s.tle = Some(TleData { epoch_utc: epoch });
-                    // Build SGP4 model (sgp4 2.3.0): parse TLE -> Elements -> Constants
-                    match sgp4::Elements::from_tle(
-                        s.name.clone(),
-                        line1.as_bytes(),
-                        line2.as_bytes(),
-                    ) {
-                        Ok(elements) => match sgp4::Constants::from_elements(&elements) {
-                            Ok(constants) => {
-                                s.propagator = Some(constants.clone());
+                let name_val = name.or_else(|| Some(format!("NORAD {}", norad)));
+                let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
+                let tle_data = TleData { epoch_utc: epoch };
 
-                                // Update entity components if entity exists
-                                if let Some(norad_index) = &norad_index {
-                                    if let Some(&entity) = norad_index.map.get(&norad) {
-                                        commands.entity(entity).insert(Propagator(constants));
-                                        commands.entity(entity).remove::<PropagationError>();
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                s.propagator = None;
-                                s.error = Some(e.to_string());
-                                eprintln!(
-                                    "[SGP4] norad={} constants error: {}",
-                                    norad,
-                                    s.error.as_deref().unwrap()
-                                );
+                // Build SGP4 model
+                let sgp4_result =
+                    sgp4::Elements::from_tle(name_val.clone(), line1.as_bytes(), line2.as_bytes())
+                        .map_err(|e| e.to_string())
+                        .and_then(|elements| {
+                            sgp4::Constants::from_elements(&elements).map_err(|e| e.to_string())
+                        });
 
-                                // Update entity with error
-                                if let Some(norad_index) = &norad_index {
-                                    if let Some(&entity) = norad_index.map.get(&norad) {
-                                        commands.entity(entity).remove::<Propagator>();
-                                        commands
-                                            .entity(entity)
-                                            .insert(PropagationError(e.to_string()));
-                                    }
-                                }
-                            }
-                        },
+                if let Some(&entity) = norad_index.map.get(&norad) {
+                    // ── Update existing entity ──
+                    let mut ec = commands.entity(entity);
+                    ec.insert(TleComponent(tle_data));
+                    ec.remove::<PropagationError>();
+
+                    if let Some(name) = &name_val {
+                        ec.insert(SatelliteName(name.clone()));
+                    }
+
+                    match sgp4_result {
+                        Ok(constants) => {
+                            ec.insert(Propagator(constants));
+                        }
                         Err(e) => {
-                            s.propagator = None;
-                            s.error = Some(e.to_string());
-                            eprintln!(
-                                "[SGP4] norad={} elements error: {}",
-                                norad,
-                                s.error.as_deref().unwrap()
-                            );
-
-                            // Update entity with error
-                            if let Some(norad_index) = &norad_index {
-                                if let Some(&entity) = norad_index.map.get(&norad) {
-                                    commands.entity(entity).remove::<Propagator>();
-                                    commands
-                                        .entity(entity)
-                                        .insert(PropagationError(e.to_string()));
-                                }
-                            }
+                            ec.remove::<Propagator>();
+                            eprintln!("[SGP4] norad={norad} error: {e}");
+                            ec.insert(PropagationError(e));
                         }
                     }
 
-                    // Update name and TLE components on entity
-                    if let Some(norad_index) = &norad_index {
-                        if let Some(&entity) = norad_index.map.get(&norad) {
-                            if let Some(name) = &s.name {
-                                commands.entity(entity).insert(SatelliteName(name.clone()));
-                            }
-                            if let Some(tle) = &s.tle {
-                                commands.entity(entity).insert(TleComponent(tle.clone()));
+                    // Sync color if this satellite just got assigned to a group
+                    if let Some(group_url) = &group {
+                        if let Some(registry) = &group_registry {
+                            if let Some(grp) = registry.groups.get(group_url) {
+                                if let Ok((mut color, _)) = sat_query.get_mut(entity) {
+                                    color.0 = grp.color;
+                                }
                             }
                         }
+                        ec.insert(SatelliteGroupUrl(group_url.clone()));
                     }
                 } else {
-                    // Create a new SatEntry for this NORAD
-                    use crate::satellite::SatEntry;
-                    use bevy::prelude::Color;
+                    // ── Spawn new data-only entity ──
+                    let (color, group_url) = resolve_color(&group, &group_registry, &mut color_hue);
 
-                    // Determine color and group_url based on whether this is a group load
-                    let (color, group_url) = if let Some(group_url) = group {
-                        // Try to get color from group registry
-                        if let Some(registry) = &group_registry {
-                            if let Some(group) = registry.groups.get(&group_url) {
-                                (group.color, Some(group_url))
-                            } else {
-                                // Group not found, fall back to golden angle
-                                let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
-                                store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
-                                (color, Some(group_url))
-                            }
-                        } else {
-                            // No registry available, fall back to golden angle
-                            let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
-                            store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
-                            (color, Some(group_url))
+                    let mut ec = commands.spawn((
+                        Satellite,
+                        NoradId(norad),
+                        SatelliteColor(color),
+                        SatelliteFlags::default(),
+                        TleComponent(tle_data),
+                    ));
+
+                    if let Some(name) = &name_val {
+                        ec.insert(SatelliteName(name.clone()));
+                    }
+
+                    match sgp4_result {
+                        Ok(constants) => {
+                            ec.insert(Propagator(constants));
                         }
-                    } else {
-                        // Not loading as part of a group, use golden angle
-                        let color = Color::hsl(store.next_color_hue, 0.8, 0.5);
-                        store.next_color_hue = (store.next_color_hue + 137.5) % 360.0;
-                        (color, None)
-                    };
+                        Err(e) => {
+                            eprintln!("[SGP4] norad={norad} error: {e}");
+                            ec.insert(PropagationError(e));
+                        }
+                    }
 
-                    let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
-                    let name_val = name.clone().or_else(|| Some(format!("NORAD {}", norad)));
-                    let propagator = sgp4::Elements::from_tle(
-                        name_val.clone(),
-                        line1.as_bytes(),
-                        line2.as_bytes(),
-                    )
-                    .ok()
-                    .and_then(|elements| sgp4::Constants::from_elements(&elements).ok());
-                    let entry = SatEntry {
-                        name: name_val.clone(),
-                        color,
-                        entity: None,
-                        tle: Some(TleData { epoch_utc: epoch }),
-                        propagator,
-                        error: None,
-                        show_ground_track: false,
-                        show_trail: false,
-                        is_clicked: false,
-                        group_url,
-                    };
-                    store.items.insert(norad, entry);
+                    if let Some(url) = &group_url {
+                        ec.insert(SatelliteGroupUrl(url.clone()));
+                    }
+
+                    let entity = ec.id();
+                    norad_index.map.insert(norad, entity);
                 }
             }
             FetchResultMsg::Failure { norad, error } => {
@@ -167,25 +122,15 @@ pub fn process_fetch_results_system(
                     "[TLE DISPATCH] received FAILURE for norad={}: {}",
                     norad, error
                 );
-                if let Some(s) = store.items.get_mut(&norad) {
-                    // keep existing name if any; record error and clear models
-                    s.error = Some(error.clone());
-                    s.tle = None;
-                    s.propagator = None;
-
-                    // Update entity components
-                    if let Some(norad_index) = &norad_index {
-                        if let Some(&entity) = norad_index.map.get(&norad) {
-                            commands.entity(entity).remove::<TleComponent>();
-                            commands.entity(entity).remove::<Propagator>();
-                            commands
-                                .entity(entity)
-                                .insert(PropagationError(error.clone()));
-                        }
-                    }
+                if let Some(&entity) = norad_index.map.get(&norad) {
+                    commands
+                        .entity(entity)
+                        .remove::<TleComponent>()
+                        .remove::<Propagator>()
+                        .insert(PropagationError(error));
                 } else {
                     eprintln!(
-                        "[TLE DISPATCH] failure for unknown norad={} (not in store)",
+                        "[TLE DISPATCH] failure for unknown norad={} (not in index)",
                         norad
                     );
                 }
@@ -203,5 +148,28 @@ pub fn process_fetch_results_system(
                 right_ui.error = Some(format!("Group fetch failed: {}", error));
             }
         }
+    }
+}
+
+/// Determine color for a new satellite based on group registry or golden-angle hue.
+fn resolve_color(
+    group: &Option<String>,
+    group_registry: &Option<Res<GroupRegistry>>,
+    color_hue: &mut ColorHueCounter,
+) -> (Color, Option<String>) {
+    if let Some(group_url) = group {
+        if let Some(registry) = group_registry {
+            if let Some(grp) = registry.groups.get(group_url) {
+                return (grp.color, Some(group_url.clone()));
+            }
+        }
+        // Group URL provided but not found in registry — use golden angle
+        let color = Color::hsl(color_hue.next_hue, 0.8, 0.5);
+        color_hue.next_hue = (color_hue.next_hue + 137.5) % 360.0;
+        (color, Some(group_url.clone()))
+    } else {
+        let color = Color::hsl(color_hue.next_hue, 0.8, 0.5);
+        color_hue.next_hue = (color_hue.next_hue + 137.5) % 360.0;
+        (color, None)
     }
 }
