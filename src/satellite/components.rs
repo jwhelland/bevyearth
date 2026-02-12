@@ -29,9 +29,9 @@ pub struct TleComponent(pub TleData);
 #[derive(Component)]
 pub struct Propagator(pub sgp4::Constants);
 
-/// Component storing propagation error message
+/// Marker component for satellites that have SGP4 propagation errors
 #[derive(Component)]
-pub struct PropagationError(pub String);
+pub struct PropagationError;
 
 /// Component storing the group URL this satellite belongs to
 #[derive(Component)]

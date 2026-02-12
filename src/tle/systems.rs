@@ -68,7 +68,7 @@ pub fn process_fetch_results_system(
                         Err(e) => {
                             ec.remove::<Propagator>();
                             eprintln!("[SGP4] norad={norad} error: {e}");
-                            ec.insert(PropagationError(e));
+                            ec.insert(PropagationError);
                         }
                     }
 
@@ -105,7 +105,7 @@ pub fn process_fetch_results_system(
                         }
                         Err(e) => {
                             eprintln!("[SGP4] norad={norad} error: {e}");
-                            ec.insert(PropagationError(e));
+                            ec.insert(PropagationError);
                         }
                     }
 
@@ -127,7 +127,7 @@ pub fn process_fetch_results_system(
                         .entity(entity)
                         .remove::<TleComponent>()
                         .remove::<Propagator>()
-                        .insert(PropagationError(error));
+                        .insert(PropagationError);
                 } else {
                     eprintln!(
                         "[TLE DISPATCH] failure for unknown norad={} (not in index)",
