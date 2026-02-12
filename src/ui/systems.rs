@@ -393,6 +393,26 @@ type SliderVisualQuery<'w, 's> = Query<
 type MainCameraQuery<'w, 's> =
     Query<'w, 's, (&'static mut PanOrbitCamera, &'static mut Transform), With<MainCamera>>;
 
+type SatListQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static NoradId,
+        Option<&'static SatelliteName>,
+        &'static SatelliteFlags,
+        Option<&'static Propagator>,
+        Option<&'static PropagationError>,
+        Option<&'static TleComponent>,
+    ),
+    With<Satellite>,
+>;
+
+type PropagatorChangeQuery<'w, 's> =
+    Query<'w, 's, (), Or<(Added<Propagator>, Changed<Propagator>)>>;
+
+type GroupUrlChangeQuery<'w, 's> =
+    Query<'w, 's, (), Or<(Added<SatelliteGroupUrl>, Changed<SatelliteGroupUrl>)>>;
+
 #[derive(SystemParam)]
 struct SyncWidgetStateParams<'w, 's> {
     ui_state: Res<'w, UIState>,
@@ -417,6 +437,9 @@ struct SyncWidgetStateParams<'w, 's> {
         Query<'w, 's, (&'static SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
     norad_index: Res<'w, NoradIndex>,
     sat_flags: Query<'w, 's, &'static SatelliteFlags, With<Satellite>>,
+    flags_changed: Query<'w, 's, (), Changed<SatelliteFlags>>,
+    propagator_added_or_changed: PropagatorChangeQuery<'w, 's>,
+    removed_propagators: RemovedComponents<'w, 's, Propagator>,
 }
 
 #[derive(SystemParam)]
@@ -3154,17 +3177,7 @@ struct SatelliteRowRefs {
 }
 
 fn update_satellite_list(
-    sat_query: Query<
-        (
-            &NoradId,
-            Option<&SatelliteName>,
-            &SatelliteFlags,
-            Option<&Propagator>,
-            Option<&PropagationError>,
-            Option<&TleComponent>,
-        ),
-        With<Satellite>,
-    >,
+    sat_query: SatListQuery<'_, '_>,
     selected: Res<SelectedSatellite>,
     ui_entities: Res<UiEntities>,
     row_query: Query<(Entity, &SatelliteRow, &SatelliteRowRefs)>,
@@ -3215,10 +3228,10 @@ fn update_satellite_list(
                 }
             }
 
-            if let Ok((mut text, _)) = texts.get_mut(refs.name_text) {
-                if text.0 != name_str {
-                    text.0 = name_str.to_string();
-                }
+            if let Ok((mut text, _)) = texts.get_mut(refs.name_text)
+                && text.0 != name_str
+            {
+                text.0 = name_str.to_string();
             }
 
             if let Ok((mut text, mut color_opt)) = texts.get_mut(refs.status_text) {
@@ -3446,6 +3459,10 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         || params.selected.is_changed()
         || params.sim_time.is_changed()
         || params.right_ui.is_changed()
+        || params.norad_index.is_changed()
+        || !params.flags_changed.is_empty()
+        || !params.propagator_added_or_changed.is_empty()
+        || !params.removed_propagators.is_empty()
     {
         for (entity, binding, checked) in params.checkboxes.iter_mut() {
             let should_check = match binding {
@@ -4371,6 +4388,8 @@ fn update_group_list_visuals(
     right_ui: Res<RightPanelUI>,
     group_registry: Res<crate::satellite::resources::GroupRegistry>,
     group_urls: Query<&SatelliteGroupUrl, With<Satellite>>,
+    group_urls_changed: GroupUrlChangeQuery<'_, '_>,
+    removed_group_urls: RemovedComponents<SatelliteGroupUrl>,
     mut swatches: Query<(&GroupColorSwatch, &mut BackgroundColor, &mut BorderColor)>,
     mut status_texts: Query<(
         &GroupLoadedText,
@@ -4378,7 +4397,11 @@ fn update_group_list_visuals(
         &mut TextColor,
     )>,
 ) {
-    if !right_ui.is_changed() && !group_registry.is_changed() {
+    if !right_ui.is_changed()
+        && !group_registry.is_changed()
+        && group_urls_changed.is_empty()
+        && removed_group_urls.is_empty()
+    {
         return;
     }
 

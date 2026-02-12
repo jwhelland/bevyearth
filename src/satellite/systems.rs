@@ -26,6 +26,35 @@ type CameraQuery<'w, 's> = Query<
     (With<Camera3d>, Without<Satellite>),
 >;
 
+type PropagateQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static TleComponent,
+        &'static Propagator,
+        &'static mut Transform,
+        &'static mut SatelliteColor,
+        Option<&'static mut WorldEcefKm>,
+    ),
+    With<Satellite>,
+>;
+
+type UnmaterializedQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static NoradId,
+        &'static SatelliteColor,
+        Option<&'static SatelliteGroupUrl>,
+    ),
+    (With<Satellite>, Without<Mesh3d>),
+>;
+
+type SatellitesWithoutTrailQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static SatelliteFlags), (With<Satellite>, Without<OrbitTrail>)>;
+
 fn emissive_scale(intensity: f32) -> f32 {
     // Square for perceptual control: low values have more visible effect, high values still pop.
     intensity * intensity
@@ -43,17 +72,7 @@ pub fn init_satellite_render_assets(mut commands: Commands, mut meshes: ResMut<A
 pub fn propagate_satellites_system(
     sim_time: Res<SimulationTime>,
     dut1: Res<Dut1>,
-    mut q: Query<
-        (
-            Entity,
-            &TleComponent,
-            &Propagator,
-            &mut Transform,
-            &mut SatelliteColor,
-            Option<&mut WorldEcefKm>,
-        ),
-        With<Satellite>,
-    >,
+    mut q: PropagateQuery<'_, '_>,
     mut commands: Commands,
 ) {
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
@@ -79,15 +98,7 @@ pub fn propagate_satellites_system(
 /// entities that don't have them yet. Entities are spawned as data-only by the
 /// TLE processing system; this system "materializes" them for rendering.
 pub fn materialize_satellite_entities_system(
-    unmaterialized: Query<
-        (
-            Entity,
-            &NoradId,
-            &SatelliteColor,
-            Option<&SatelliteGroupUrl>,
-        ),
-        (With<Satellite>, Without<Mesh3d>),
-    >,
+    unmaterialized: UnmaterializedQuery<'_, '_>,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     render_assets: Res<SatelliteRenderAssets>,
@@ -138,10 +149,7 @@ pub fn update_orbit_trails_system(
     sim_time: Res<SimulationTime>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
     mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, &SatelliteFlags), With<Satellite>>,
-    satellites_without_trail: Query<
-        (Entity, &SatelliteFlags),
-        (With<Satellite>, Without<OrbitTrail>),
-    >,
+    satellites_without_trail: SatellitesWithoutTrailQuery<'_, '_>,
     mut commands: Commands,
 ) {
     let current_time = sim_time.current_utc;

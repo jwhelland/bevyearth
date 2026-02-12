@@ -569,6 +569,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_camera_controller"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bc6fe8a42ad770c56bbc94e5d96696069200cdfdb9e57cb6db3f480f92a4571"
+dependencies = [
+ "bevy_app",
+ "bevy_camera",
+ "bevy_ecs",
+ "bevy_input",
+ "bevy_log",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_time",
+ "bevy_transform",
+ "bevy_window",
+]
+
+[[package]]
 name = "bevy_color"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1668,6 +1686,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "bevy_camera_controller",
  "bevy_feathers",
  "bevy_input_focus",
  "bevy_panorbit_camera",

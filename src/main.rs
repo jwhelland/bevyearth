@@ -1,25 +1,64 @@
 // Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::light::GlobalAmbientLight;
-use bevy::light::SunDisk;
 use bevy::mesh::Mesh;
-use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
 use bevy::window::{PresentMode, Window, WindowPlugin};
-use bevy_feathers::FeathersPlugins;
-use bevy_feathers::dark_theme::create_dark_theme;
-use bevy_feathers::palette;
-use bevy_feathers::theme::UiTheme;
-use bevy_input_focus::directional_navigation::DirectionalNavigationPlugin;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-#[cfg(feature = "dev_camera")]
-use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use bevy::core_pipeline::Skybox;
 #[cfg(feature = "dev")]
 use bevy::dev_tools::fps_overlay::FpsOverlayPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy::light::{GlobalAmbientLight, SunDisk};
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy::picking::prelude::MeshPickingPlugin;
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use bevy::post_process::bloom::Bloom;
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use bevy::render::view::Hdr;
+#[cfg(all(
+    feature = "dev_camera",
+    any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+    )
+))]
+use bevy_camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy_feathers::{FeathersPlugins, dark_theme::create_dark_theme, palette, theme::UiTheme};
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy_input_focus::directional_navigation::DirectionalNavigationPlugin;
 
 mod core;
 mod orbital;
@@ -30,25 +69,81 @@ mod ui;
 mod visualization;
 
 // Import plugins
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use orbital::OrbitalPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use satellite::SatellitePlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use space_weather::SpaceWeatherPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use tle::TlePlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use ui::{MainCamera, SkyboxPlugin, UiPlugin, skybox::Cubemap};
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use ui::{SkyboxPlugin, skybox::Cubemap};
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use visualization::{
     CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, HeatmapPlugin,
     MoonPlugin, ShowAxes, SunLight, VisualizationPlugin,
 };
 
-#[cfg(all(feature = "debug_basic_scene", feature = "debug_scene_camera"))]
-compile_error!("Enable only one of: debug_basic_scene or debug_scene_camera.");
-
-#[cfg(feature = "dev_camera")]
+#[cfg(all(
+    feature = "dev_camera",
+    any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+    )
+))]
 #[derive(Component)]
 struct DevCamera;
 
 // Setup scene and cameras
-#[cfg(not(feature = "debug_basic_scene"))]
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -132,7 +227,7 @@ pub fn setup(
     });
 }
 
-#[cfg(feature = "debug_basic_scene")]
+#[cfg(all(feature = "debug_basic_scene", not(feature = "debug_scene_camera")))]
 fn setup_basic_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -170,13 +265,13 @@ fn setup_basic_scene(
     ));
 }
 
-#[cfg(feature = "debug_scene_camera")]
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 #[derive(Resource)]
 struct DebugSceneCamera {
     entity: Entity,
 }
 
-#[cfg(feature = "debug_scene_camera")]
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 fn setup_debug_scene_camera(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -229,7 +324,7 @@ fn setup_debug_scene_camera(
     });
 }
 
-#[cfg(feature = "debug_scene_camera")]
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 fn toggle_debug_scene_components(
     input: Res<ButtonInput<KeyCode>>,
     cam: Res<DebugSceneCamera>,
@@ -256,7 +351,16 @@ fn toggle_debug_scene_components(
     }
 }
 
-#[cfg(feature = "dev_camera")]
+#[cfg(all(
+    feature = "dev_camera",
+    any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+    )
+))]
 fn setup_dev_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
@@ -275,7 +379,16 @@ fn setup_dev_camera(mut commands: Commands) {
     ));
 }
 
-#[cfg(feature = "dev_camera")]
+#[cfg(all(
+    feature = "dev_camera",
+    any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+    )
+))]
 fn toggle_dev_camera(
     input: Res<ButtonInput<KeyCode>>,
     mut main_camera: Query<&mut Camera, (With<MainCamera>, Without<DevCamera>)>,
@@ -285,8 +398,8 @@ fn toggle_dev_camera(
         return;
     }
 
-    if let Ok(mut main) = main_camera.get_single_mut()
-        && let Ok(mut dev) = dev_camera.get_single_mut()
+    if let Ok(mut main) = main_camera.single_mut()
+        && let Ok(mut dev) = dev_camera.single_mut()
     {
         let dev_active = dev.is_active;
         dev.is_active = !dev_active;
@@ -316,9 +429,15 @@ fn main() {
     #[cfg(feature = "dev")]
     app.add_plugins(FpsOverlayPlugin::default());
 
-    #[cfg(all(
-        not(feature = "debug_basic_scene"),
-        not(feature = "debug_scene_camera")
+    #[cfg(all(feature = "debug_basic_scene", feature = "debug_scene_camera"))]
+    warn!("Both debug scene features enabled; using full app.");
+
+    #[cfg(any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
     ))]
     {
         // Feathers initializes `UiTheme` but does not populate it by default.
@@ -408,12 +527,12 @@ fn main() {
         app.add_systems(Startup, setup);
     }
 
-    #[cfg(feature = "debug_basic_scene")]
+    #[cfg(all(feature = "debug_basic_scene", not(feature = "debug_scene_camera")))]
     {
         app.add_systems(Startup, setup_basic_scene);
     }
 
-    #[cfg(feature = "debug_scene_camera")]
+    #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
     {
         app.add_plugins(PanOrbitCameraPlugin);
         app.add_plugins(SkyboxPlugin);
@@ -423,8 +542,13 @@ fn main() {
 
     #[cfg(all(
         feature = "dev_camera",
-        not(feature = "debug_basic_scene"),
-        not(feature = "debug_scene_camera")
+        any(
+            all(
+                not(feature = "debug_basic_scene"),
+                not(feature = "debug_scene_camera")
+            ),
+            all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+        )
     ))]
     {
         app.add_systems(Startup, setup_dev_camera);

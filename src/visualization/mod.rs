@@ -19,14 +19,22 @@ pub mod moon;
 pub mod sky_material;
 
 pub use arrows::draw_city_to_satellite_arrows;
+#[allow(unused_imports)]
 pub use axes::{ShowAxes, draw_axes};
+#[allow(unused_imports)]
 pub use cities::{CitiesEcef, CitiesPlugin};
 pub use config::ArrowConfig;
+#[allow(unused_imports)]
 pub use earth::EarthPlugin;
+#[allow(unused_imports)]
 pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
+#[allow(unused_imports)]
 pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
+#[allow(unused_imports)]
 pub use heatmap::{HeatmapConfig, HeatmapPlugin, RangeMode};
+#[allow(unused_imports)]
 pub use lighting::SunLight;
+#[allow(unused_imports)]
 pub use moon::MoonPlugin;
 pub use sky_material::SkyMaterialPlugin;
 

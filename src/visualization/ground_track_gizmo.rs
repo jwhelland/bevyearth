@@ -11,6 +11,20 @@ use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::satellite::components::{Propagator, Satellite, SatelliteFlags};
 use bevy::math::DVec3;
 
+type SatellitesWithGizmoQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static SatelliteFlags, Option<&'static Propagator>),
+    (With<Satellite>, With<GroundTrackGizmo>),
+>;
+
+type SatellitesWithoutGizmoQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static SatelliteFlags, Option<&'static Propagator>),
+    (With<Satellite>, Without<GroundTrackGizmo>),
+>;
+
 /// Plugin for ground track gizmo rendering and management
 pub struct GroundTrackGizmoPlugin;
 
@@ -31,14 +45,8 @@ impl Plugin for GroundTrackGizmoPlugin {
 fn manage_ground_track_gizmo_components_system(
     mut commands: Commands,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    satellites_with_gizmo: Query<
-        (Entity, &SatelliteFlags, Option<&Propagator>),
-        (With<Satellite>, With<GroundTrackGizmo>),
-    >,
-    satellites_without_gizmo: Query<
-        (Entity, &SatelliteFlags, Option<&Propagator>),
-        (With<Satellite>, Without<GroundTrackGizmo>),
-    >,
+    satellites_with_gizmo: SatellitesWithGizmoQuery<'_, '_>,
+    satellites_without_gizmo: SatellitesWithoutGizmoQuery<'_, '_>,
 ) {
     if !config_bundle.ground_track_cfg.enabled || !config_bundle.gizmo_cfg.enabled {
         // If ground tracks are globally disabled, remove all GroundTrackGizmo components

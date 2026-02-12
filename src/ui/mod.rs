@@ -12,7 +12,9 @@ pub mod systems;
 
 pub use skybox::SkyboxPlugin;
 pub use state::{CameraFocusState, RightPanelUI, UIState, UiLayoutState};
-pub use systems::{MainCamera, UiConfigBundle};
+#[allow(unused_imports)]
+pub use systems::MainCamera;
+pub use systems::UiConfigBundle;
 
 /// Plugin for user interface management
 pub struct UiPlugin;

@@ -74,12 +74,11 @@ pub fn process_fetch_results_system(
 
                     // Sync color if this satellite just got assigned to a group
                     if let Some(group_url) = &group {
-                        if let Some(registry) = &group_registry {
-                            if let Some(grp) = registry.groups.get(group_url) {
-                                if let Ok((mut color, _)) = sat_query.get_mut(entity) {
-                                    color.0 = grp.color;
-                                }
-                            }
+                        if let Some(registry) = &group_registry
+                            && let Some(grp) = registry.groups.get(group_url)
+                            && let Ok((mut color, _)) = sat_query.get_mut(entity)
+                        {
+                            color.0 = grp.color;
                         }
                         ec.insert(SatelliteGroupUrl(group_url.clone()));
                     }
@@ -158,10 +157,10 @@ fn resolve_color(
     color_hue: &mut ColorHueCounter,
 ) -> (Color, Option<String>) {
     if let Some(group_url) = group {
-        if let Some(registry) = group_registry {
-            if let Some(grp) = registry.groups.get(group_url) {
-                return (grp.color, Some(group_url.clone()));
-            }
+        if let Some(registry) = group_registry
+            && let Some(grp) = registry.groups.get(group_url)
+        {
+            return (grp.color, Some(group_url.clone()));
         }
         // Group URL provided but not found in registry — use golden angle
         let color = Color::hsl(color_hue.next_hue, 0.8, 0.5);
