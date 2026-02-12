@@ -44,11 +44,13 @@ pub fn init_satellite_render_assets(mut commands: Commands, mut meshes: ResMut<A
 
 /// System to propagate satellites using SGP4 and update their transforms
 pub fn propagate_satellites_system(
-    store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
     dut1: Res<Dut1>,
     mut q: Query<
         (
+            Entity,
+            &TleComponent,
+            &Propagator,
             &mut Transform,
             &mut SatelliteColor,
             Option<&mut WorldEcefKm>,
@@ -58,25 +60,19 @@ pub fn propagate_satellites_system(
     mut commands: Commands,
 ) {
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
-    for entry in store.items.values() {
-        if let (Some(tle), Some(constants)) = (&entry.tle, &entry.propagator) {
-            let mins = minutes_since_epoch(sim_time.current_utc, tle.epoch_utc);
-            // sgp4 2.3.0 expects MinutesSinceEpoch newtype and returns arrays
-            if let Ok(state) = constants.propagate(sgp4::MinutesSinceEpoch(mins)) {
-                let pos = state.position; // [f64; 3] in km (TEME)
-                let eci = DVec3::new(pos[0], pos[1], pos[2]);
-                let ecef = eci_to_ecef_km(eci, gmst);
-                if let Some(entity) = entry.entity
-                    && let Ok((mut t, mut c, world_opt)) = q.get_mut(entity)
-                {
-                    t.translation = ecef_to_bevy_km(ecef);
-                    if let Some(mut world) = world_opt {
-                        world.0 = ecef;
-                    } else {
-                        commands.entity(entity).insert(WorldEcefKm(ecef));
-                    }
-                    c.0 = entry.color;
-                }
+    for (entity, tle_comp, propagator, mut transform, _color, world_opt) in q.iter_mut() {
+        let mins = minutes_since_epoch(sim_time.current_utc, tle_comp.0.epoch_utc);
+        // sgp4 2.3.0 expects MinutesSinceEpoch newtype and returns arrays
+        if let Ok(state) = propagator.0.propagate(sgp4::MinutesSinceEpoch(mins)) {
+            let pos = state.position; // [f64; 3] in km (TEME)
+            let eci = DVec3::new(pos[0], pos[1], pos[2]);
+            let ecef = eci_to_ecef_km(eci, gmst);
+
+            transform.translation = ecef_to_bevy_km(ecef);
+            if let Some(mut world) = world_opt {
+                world.0 = ecef;
+            } else {
+                commands.entity(entity).insert(WorldEcefKm(ecef));
             }
         }
     }
@@ -263,60 +259,54 @@ pub fn spawn_missing_satellite_entities_system(
 
 /// System to update orbit trail history for satellites
 pub fn update_orbit_trails_system(
-    store: Res<SatelliteStore>,
     sim_time: Res<SimulationTime>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, &NoradId), With<Satellite>>,
+    mut trail_query: Query<(&mut OrbitTrail, &WorldEcefKm, &SatelliteFlags), With<Satellite>>,
+    satellites_without_trail: Query<(Entity, &SatelliteFlags), (With<Satellite>, Without<OrbitTrail>)>,
     mut commands: Commands,
 ) {
     let current_time = sim_time.current_utc;
 
-    for (mut trail, world_ecef, norad) in trail_query.iter_mut() {
-        if let Some(entry) = store.items.get(&norad.0) {
-            // Only update trail if it's enabled for this satellite
-            if !entry.show_trail {
-                // Clear trail if disabled
-                trail.history.clear();
-                continue;
-            }
+    for (mut trail, world_ecef, flags) in trail_query.iter_mut() {
+        // Only update trail if it's enabled for this satellite
+        if !flags.show_trail {
+            // Clear trail if disabled
+            trail.history.clear();
+            continue;
+        }
 
-            // Check if enough time has passed to add a new trail point
-            let should_add_point = trail.history.is_empty()
-                || trail
-                    .history
-                    .last()
-                    .map(|last| {
-                        current_time
-                            .signed_duration_since(last.timestamp)
-                            .num_milliseconds() as f32
-                            / 1000.0
-                            >= config_bundle.trail_cfg.update_interval_seconds
-                    })
-                    .unwrap_or(true);
+        // Check if enough time has passed to add a new trail point
+        let should_add_point = trail.history.is_empty()
+            || trail
+                .history
+                .last()
+                .map(|last| {
+                    current_time
+                        .signed_duration_since(last.timestamp)
+                        .num_milliseconds() as f32
+                        / 1000.0
+                        >= config_bundle.trail_cfg.update_interval_seconds
+                })
+                .unwrap_or(true);
 
-            if should_add_point {
-                // Add new trail point
-                trail.history.push(TrailPoint {
-                    position_ecef_km: world_ecef.0,
-                    timestamp: current_time,
-                });
-            }
+        if should_add_point {
+            // Add new trail point
+            trail.history.push(TrailPoint {
+                position_ecef_km: world_ecef.0,
+                timestamp: current_time,
+            });
+        }
 
-            // Limit number of points to max 1000
-            if trail.history.len() > config_bundle.trail_cfg.max_points {
-                let excess = trail.history.len() - config_bundle.trail_cfg.max_points;
-                trail.history.drain(0..excess);
-            }
+        // Limit number of points to max 1000
+        if trail.history.len() > config_bundle.trail_cfg.max_points {
+            let excess = trail.history.len() - config_bundle.trail_cfg.max_points;
+            trail.history.drain(0..excess);
         }
     }
 
     // Add OrbitTrail component to satellites that don't have it but need it
-    for entry in store.items.values() {
-        if let Some(entity) = entry.entity
-            && entry.show_trail
-            && trail_query.get(entity).is_err()
-        {
-            // Check if entity already has OrbitTrail component
+    for (entity, flags) in satellites_without_trail.iter() {
+        if flags.show_trail {
             commands.entity(entity).insert(OrbitTrail::default());
         }
     }
@@ -324,34 +314,31 @@ pub fn update_orbit_trails_system(
 
 /// System to draw orbit trails using gizmos
 pub fn draw_orbit_trails_system(
-    store: Res<SatelliteStore>,
-    trail_query: Query<(&OrbitTrail, &NoradId), With<Satellite>>,
+    trail_query: Query<(&OrbitTrail, &SatelliteColor, &SatelliteFlags), With<Satellite>>,
     mut gizmos: Gizmos,
 ) {
-    for (trail, norad) in trail_query.iter() {
-        if let Some(entry) = store.items.get(&norad.0) {
-            if !entry.show_trail || trail.history.len() < 2 {
-                continue;
-            }
+    for (trail, color, flags) in trail_query.iter() {
+        if !flags.show_trail || trail.history.len() < 2 {
+            continue;
+        }
 
-            let srgba = entry.color.to_srgba();
-            let trail_length = trail.history.len() as f32;
+        let srgba = color.0.to_srgba();
+        let trail_length = trail.history.len() as f32;
 
-            // Draw lines between consecutive trail points
-            for (i, window) in trail.history.windows(2).enumerate() {
-                let point1 = &window[0];
-                let point2 = &window[1];
+        // Draw lines between consecutive trail points
+        for (i, window) in trail.history.windows(2).enumerate() {
+            let point1 = &window[0];
+            let point2 = &window[1];
 
-                // Calculate alpha based on position in trail (newer = more opaque)
-                let alpha = (0.1 + 0.9 * (i as f32 / trail_length.max(1.0))).min(1.0);
+            // Calculate alpha based on position in trail (newer = more opaque)
+            let alpha = (0.1 + 0.9 * (i as f32 / trail_length.max(1.0))).min(1.0);
 
-                let trail_color = Color::srgba(srgba.red, srgba.green, srgba.blue, alpha);
+            let trail_color = Color::srgba(srgba.red, srgba.green, srgba.blue, alpha);
 
-                // Draw line segment (convert canonical ECEF to Bevy render space)
-                let point1_bevy = ecef_to_bevy_km(point1.position_ecef_km);
-                let point2_bevy = ecef_to_bevy_km(point2.position_ecef_km);
-                gizmos.line(point1_bevy, point2_bevy, trail_color);
-            }
+            // Draw line segment (convert canonical ECEF to Bevy render space)
+            let point1_bevy = ecef_to_bevy_km(point1.position_ecef_km);
+            let point2_bevy = ecef_to_bevy_km(point2.position_ecef_km);
+            gizmos.line(point1_bevy, point2_bevy, trail_color);
         }
     }
 }
@@ -359,12 +346,12 @@ pub fn draw_orbit_trails_system(
 /// System to move camera to selected satellite with offset
 pub fn move_camera_to_satellite(
     mut selected: ResMut<SelectedSatellite>,
-    store: Res<SatelliteStore>,
+    norad_index: Res<NoradIndex>,
     mut q_camera: CameraQuery<'_, '_>,
     q_sat: Query<&Transform, With<Satellite>>,
 ) {
     if let Some(norad) = selected.selected.take() {
-        if let Some(entity) = store.items.get(&norad).and_then(|e| e.entity) {
+        if let Some(&entity) = norad_index.map.get(&norad) {
             if let Ok(sat_transform) = q_sat.get(entity) {
                 let sat_pos = sat_transform.translation;
 
@@ -420,14 +407,14 @@ pub fn move_camera_to_satellite(
 /// System to continuously track a satellite with the camera
 pub fn track_satellite_continuously(
     tracking: Res<SelectedSatellite>,
-    store: Res<SatelliteStore>,
+    norad_index: Res<NoradIndex>,
     mut q_camera: CameraQuery<'_, '_>,
     q_sat: Query<&Transform, With<Satellite>>,
     time: Res<Time>,
 ) {
     // Only track if we have a tracking target
     if let Some(tracking_norad) = tracking.tracking
-        && let Some(entity) = store.items.get(&tracking_norad).and_then(|e| e.entity)
+        && let Some(&entity) = norad_index.map.get(&tracking_norad)
         && let Ok(sat_transform) = q_sat.get(entity)
     {
         let sat_pos = sat_transform.translation;

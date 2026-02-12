@@ -38,6 +38,8 @@ use std::collections::HashMap;
 use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::time::SimulationTime;
 use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
+use crate::satellite::components::{NoradId, Satellite, SatelliteFlags, SatelliteName};
+use crate::satellite::resources::NoradIndex;
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
 };
@@ -2852,7 +2854,9 @@ fn update_satellite_list_panel_width(
 
 #[allow(clippy::type_complexity)]
 fn update_status_texts(
-    store: Res<SatelliteStore>,
+    satellites: Query<(), With<Satellite>>,
+    all_satellites: Query<(&NoradId, Option<&SatelliteName>, &SatelliteFlags), With<Satellite>>,
+    norad_index: Res<NoradIndex>,
     mut texts: ParamSet<(
         Query<&mut bevy::ui::widget::Text, With<SatelliteCountText>>,
         Query<&mut bevy::ui::widget::Text, With<FetchStatusText>>,
@@ -2863,7 +2867,7 @@ fn update_status_texts(
     fetch: Option<Res<FetchChannels>>,
 ) {
     for mut text in texts.p0().iter_mut() {
-        text.0 = format!("Satellites: {}", store.items.len());
+        text.0 = format!("Satellites: {}", satellites.iter().count());
     }
     for mut text in texts.p1().iter_mut() {
         text.0 = if fetch.is_some() {
@@ -2873,9 +2877,11 @@ fn update_status_texts(
         };
     }
     for mut text in texts.p2().iter_mut() {
-        if let Some((norad, entry)) = store.items.iter().find(|(_, e)| e.is_clicked) {
-            let name = entry.name.as_deref().unwrap_or("Unnamed");
-            text.0 = format!("Selected: {} ({})", name, norad);
+        // Find clicked satellite by checking flags
+        let clicked = all_satellites.iter().find(|(_, _, flags)| flags.is_clicked);
+        if let Some((norad, name_opt, _)) = clicked {
+            let name = name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed");
+            text.0 = format!("Selected: {} ({})", name, norad.0);
         } else {
             text.0 = "Selected: None".to_string();
         }
@@ -2883,9 +2889,13 @@ fn update_status_texts(
 
     for mut text in texts.p3().iter_mut() {
         if let Some(norad) = selected.tracking {
-            if let Some(entry) = store.items.get(&norad) {
-                let name = entry.name.as_deref().unwrap_or("Unnamed");
-                text.0 = format!("Tracking: {} ({})", name, norad);
+            if let Some(&entity) = norad_index.map.get(&norad) {
+                if let Ok((_, name_opt, _)) = all_satellites.get(entity) {
+                    let name = name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed");
+                    text.0 = format!("Tracking: {} ({})", name, norad);
+                } else {
+                    text.0 = format!("Tracking: {}", norad);
+                }
             } else {
                 text.0 = format!("Tracking: {}", norad);
             }

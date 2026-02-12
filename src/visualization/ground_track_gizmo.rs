@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 
 use crate::core::coordinates::EARTH_RADIUS_KM;
 use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
-use crate::satellite::{Satellite, SatelliteStore};
+use crate::satellite::components::{Propagator, Satellite, SatelliteFlags};
 use bevy::math::DVec3;
 
 /// Plugin for ground track gizmo rendering and management
@@ -30,34 +30,29 @@ impl Plugin for GroundTrackGizmoPlugin {
 /// System to manage ground track gizmo components (add/remove based on settings)
 fn manage_ground_track_gizmo_components_system(
     mut commands: Commands,
-    mut store: ResMut<SatelliteStore>,
     config_bundle: Res<crate::ui::systems::UiConfigBundle>,
-    satellite_query: Query<Entity, With<Satellite>>,
-    gizmo_query: Query<Entity, With<GroundTrackGizmo>>,
+    satellites_with_gizmo: Query<(Entity, &SatelliteFlags, Option<&Propagator>), (With<Satellite>, With<GroundTrackGizmo>)>,
+    satellites_without_gizmo: Query<(Entity, &SatelliteFlags, Option<&Propagator>), (With<Satellite>, Without<GroundTrackGizmo>)>,
 ) {
     if !config_bundle.ground_track_cfg.enabled || !config_bundle.gizmo_cfg.enabled {
         // If ground tracks are globally disabled, remove all GroundTrackGizmo components
-        for gizmo_entity in gizmo_query.iter() {
-            commands.entity(gizmo_entity).remove::<GroundTrackGizmo>();
+        for (entity, _, _) in satellites_with_gizmo.iter() {
+            commands.entity(entity).remove::<GroundTrackGizmo>();
         }
         return;
     }
 
-    for entry in store.items.values_mut() {
-        let should_show = entry.show_ground_track && entry.propagator.is_some();
+    // Add gizmo component to satellites that should show it
+    for (entity, flags, propagator_opt) in satellites_without_gizmo.iter() {
+        if flags.show_ground_track && propagator_opt.is_some() {
+            commands.entity(entity).insert(GroundTrackGizmo::new());
+        }
+    }
 
-        if let Some(sat_entity) = entry.entity
-            && let Ok(entity) = satellite_query.get(sat_entity)
-        {
-            let has_gizmo_component = gizmo_query.get(entity).is_ok();
-
-            if should_show && !has_gizmo_component {
-                // Add GroundTrackGizmo component
-                commands.entity(entity).insert(GroundTrackGizmo::new());
-            } else if !should_show && has_gizmo_component {
-                // Remove GroundTrackGizmo component
-                commands.entity(entity).remove::<GroundTrackGizmo>();
-            }
+    // Remove gizmo component from satellites that shouldn't show it
+    for (entity, flags, propagator_opt) in satellites_with_gizmo.iter() {
+        if !flags.show_ground_track || propagator_opt.is_none() {
+            commands.entity(entity).remove::<GroundTrackGizmo>();
         }
     }
 }
