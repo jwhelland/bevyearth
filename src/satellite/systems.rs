@@ -486,26 +486,27 @@ pub fn track_satellite_continuously(
 
 /// System to handle satellite click events and update the clicked satellite in the store
 pub fn satellite_click_system(
-    mut store: ResMut<SatelliteStore>,
     mut click_events: MessageReader<Pointer<Click>>,
-    norad_query: Query<&NoradId, With<Satellite>>,
+    norad_query: Query<(&NoradId, Option<&SatelliteName>), With<Satellite>>,
+    mut all_satellites: Query<&mut SatelliteFlags, With<Satellite>>,
 ) {
     for event in click_events.read() {
         let clicked_entity = event.entity;
 
         // Check if the clicked entity is a satellite
-        if let Ok(norad) = norad_query.get(clicked_entity) {
+        if let Ok((norad, name_opt)) = norad_query.get(clicked_entity) {
             // First, clear the clicked status from all satellites
-            for entry in store.items.values_mut() {
-                entry.is_clicked = false;
+            for mut flags in all_satellites.iter_mut() {
+                flags.is_clicked = false;
             }
 
-            if let Some(entry) = store.items.get_mut(&norad.0) {
-                entry.is_clicked = true;
+            // Set clicked status on the clicked satellite
+            if let Ok(mut flags) = all_satellites.get_mut(clicked_entity) {
+                flags.is_clicked = true;
 
                 info!(
                     "Clicked satellite: {} (NORAD: {})",
-                    entry.name.as_deref().unwrap_or("Unnamed"),
+                    name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed"),
                     norad.0
                 );
             }

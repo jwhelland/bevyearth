@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use crate::core::space::ecef_to_bevy_km;
 use crate::orbital::time::SimulationTime;
 use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
-use crate::satellite::components::{NoradId, Satellite, SatelliteFlags, SatelliteName};
+use crate::satellite::components::{NoradId, Propagator, Satellite, SatelliteFlags, SatelliteName};
 use crate::satellite::resources::NoradIndex;
 use crate::satellite::{
     OrbitTrailConfig, SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
@@ -412,6 +412,8 @@ struct SyncWidgetStateParams<'w, 's> {
     satellite_toggles: Query<'w, 's, (Entity, &'static SatelliteToggle, Option<&'static Checked>)>,
     focus_toggle_texts: Query<'w, 's, &'static mut bevy::ui::widget::Text, With<FocusToggleText>>,
     commands: Commands<'w, 's>,
+    // New: query for satellite flags and components
+    satellites: Query<'w, 's, (&'static SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
 }
 
 #[derive(SystemParam)]
@@ -442,6 +444,9 @@ struct CheckboxChangeParams<'w, 's> {
     heatmap_cfg: ResMut<'w, HeatmapConfig>,
     space_weather_cfg: ResMut<'w, SpaceWeatherConfig>,
     store: ResMut<'w, SatelliteStore>,
+    // New: query for satellite flags and components
+    satellites: Query<'w, 's, (&'static mut SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
+    norad_index: Res<'w, NoradIndex>,
 }
 
 /// Plugin that registers UI systems and observers
@@ -3451,22 +3456,26 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                     params.config_bundle.gizmo_cfg.show_center_dot
                 }
                 CheckboxBinding::TrailsAll => {
-                    !params.store.items.is_empty()
-                        && params
-                            .store
-                            .items
-                            .values()
-                            .filter(|s| s.propagator.is_some())
-                            .all(|s| s.show_trail)
+                    let satellites_with_propagator: Vec<(&SatelliteFlags, Option<&Propagator>)> =
+                        params
+                            .satellites
+                            .iter()
+                            .filter(|(_, p)| p.is_some())
+                            .collect();
+                    !satellites_with_propagator.is_empty()
+                        && satellites_with_propagator.iter().all(|(flags, _)| flags.show_trail)
                 }
                 CheckboxBinding::TracksAll => {
-                    !params.store.items.is_empty()
-                        && params
-                            .store
-                            .items
-                            .values()
-                            .filter(|s| s.propagator.is_some())
-                            .all(|s| s.show_ground_track)
+                    let satellites_with_propagator: Vec<(&SatelliteFlags, Option<&Propagator>)> =
+                        params
+                            .satellites
+                            .iter()
+                            .filter(|(_, p)| p.is_some())
+                            .collect();
+                    !satellites_with_propagator.is_empty()
+                        && satellites_with_propagator
+                            .iter()
+                            .all(|(flags, _)| flags.show_ground_track)
                 }
                 CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled,
                 CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled,
@@ -3822,6 +3831,12 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
                 params.config_bundle.gizmo_cfg.show_center_dot = ev.value
             }
             CheckboxBinding::TrailsAll => {
+                for (mut flags, propagator_opt) in params.satellites.iter_mut() {
+                    if propagator_opt.is_some() {
+                        flags.show_trail = ev.value;
+                    }
+                }
+                // Also update store for consistency during migration
                 for entry in params.store.items.values_mut() {
                     if entry.propagator.is_some() {
                         entry.show_trail = ev.value;
@@ -3829,6 +3844,12 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
                 }
             }
             CheckboxBinding::TracksAll => {
+                for (mut flags, propagator_opt) in params.satellites.iter_mut() {
+                    if propagator_opt.is_some() {
+                        flags.show_ground_track = ev.value;
+                    }
+                }
+                // Also update store for consistency during migration
                 for entry in params.store.items.values_mut() {
                     if entry.propagator.is_some() {
                         entry.show_ground_track = ev.value;
@@ -3842,11 +3863,12 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
     }
 
     if let Ok(toggle) = params.q_sat_toggle.get(ev.source)
-        && let Some(entry) = params.store.items.get_mut(&toggle.norad)
+        && let Some(&entity) = params.norad_index.map.get(&toggle.norad)
+        && let Ok((mut flags, _)) = params.satellites.get_mut(entity)
     {
         match toggle.kind {
-            SatelliteToggleKind::GroundTrack => entry.show_ground_track = ev.value,
-            SatelliteToggleKind::Trail => entry.show_trail = ev.value,
+            SatelliteToggleKind::GroundTrack => flags.show_ground_track = ev.value,
+            SatelliteToggleKind::Trail => flags.show_trail = ev.value,
         }
     }
 }
