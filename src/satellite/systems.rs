@@ -5,11 +5,17 @@ use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::orbital::{
     Dut1, SimulationTime, eci_to_ecef_km, gmst_rad_with_dut1, minutes_since_epoch,
 };
-use crate::satellite::components::{NoradId, OrbitTrail, Satellite, SatelliteColor, TrailPoint};
-use crate::satellite::resources::{
-    GroupMaterialCache, GroupRegistry, SatelliteRenderAssets, SatelliteStore, SelectedSatellite,
+use crate::satellite::components::{
+    NoradId, OrbitTrail, Propagator, PropagationError, Satellite, SatelliteColor, SatelliteFlags,
+    SatelliteGroupUrl, SatelliteName, TleComponent, TrailPoint,
 };
+use crate::satellite::resources::{
+    GroupMaterialCache, GroupRegistry, NoradIndex, SatelliteRenderAssets, SatelliteStore,
+    SelectedSatellite,
+};
+use crate::tle::TleData;
 use bevy::color::LinearRgba;
+use bevy::ecs::world::EntityWorldMut;
 use bevy::math::DVec3;
 use bevy::picking::events::Click;
 use bevy::picking::events::Pointer;
@@ -79,6 +85,7 @@ pub fn propagate_satellites_system(
 /// System to spawn entities for satellites that don't have them yet (e.g., from group loading)
 pub fn spawn_missing_satellite_entities_system(
     mut store: ResMut<SatelliteStore>,
+    mut norad_index: ResMut<NoradIndex>,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     render_assets: Res<SatelliteRenderAssets>,
@@ -138,6 +145,11 @@ pub fn spawn_missing_satellite_entities_system(
                         .with_scale(Vec3::splat(sphere_radius)),
                     Visibility::Visible,
                     Name::new(format!("Satellite {norad}")),
+                    SatelliteFlags {
+                        show_ground_track: entry.show_ground_track,
+                        show_trail: entry.show_trail,
+                        is_clicked: entry.is_clicked,
+                    },
                 ));
             }
         }
@@ -146,11 +158,48 @@ pub fn spawn_missing_satellite_entities_system(
         let batch_count = group_ids.len();
         commands.queue(move |world: &mut World| {
             let entities: Vec<Entity> = world.spawn_batch(bundles).collect();
-            let mut store = world.resource_mut::<SatelliteStore>();
-            for (norad, entity) in group_ids.into_iter().zip(entities) {
-                if let Some(entry) = store.items.get_mut(&norad) {
-                    entry.entity = Some(entity);
+
+            // Collect data from store before mutably borrowing world for entities
+            let mut entity_data: Vec<(u32, Entity, Option<String>, Option<TleData>, Option<sgp4::Constants>, Option<String>, Option<String>)> = Vec::new();
+            {
+                let mut store = world.resource_mut::<SatelliteStore>();
+                for (norad, entity) in group_ids.iter().zip(entities.iter()) {
+                    if let Some(entry) = store.items.get_mut(norad) {
+                        entry.entity = Some(*entity);
+                        entity_data.push((
+                            *norad,
+                            *entity,
+                            entry.name.clone(),
+                            entry.tle.clone(),
+                            entry.propagator.clone(),
+                            entry.error.clone(),
+                            entry.group_url.clone(),
+                        ));
+                    }
                 }
+            }
+
+            // Now add components to entities
+            for (norad, entity, name, tle, propagator, error, group_url) in entity_data {
+                let mut entity_mut: EntityWorldMut = world.entity_mut(entity);
+                if let Some(name) = name {
+                    entity_mut.insert(SatelliteName(name));
+                }
+                if let Some(tle) = tle {
+                    entity_mut.insert(TleComponent(tle));
+                }
+                if let Some(propagator) = propagator {
+                    entity_mut.insert(Propagator(propagator));
+                }
+                if let Some(error) = error {
+                    entity_mut.insert(PropagationError(error));
+                }
+                if let Some(group_url) = group_url {
+                    entity_mut.insert(SatelliteGroupUrl(group_url));
+                }
+
+                // Update NoradIndex
+                world.resource_mut::<NoradIndex>().map.insert(norad, entity);
             }
 
             info!(
@@ -171,20 +220,43 @@ pub fn spawn_missing_satellite_entities_system(
                 ..Default::default()
             });
 
-            let entity = commands
-                .spawn((
-                    Mesh3d(render_assets.sphere_mesh.clone()),
-                    MeshMaterial3d(material_handle),
-                    NoradId(norad),
-                    Satellite,
-                    SatelliteColor(entry.color),
-                    Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
-                        .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
-                    Visibility::Visible,
-                    Name::new(format!("Satellite {norad}")),
-                ))
-                .id();
+            let mut entity_commands = commands.spawn((
+                Mesh3d(render_assets.sphere_mesh.clone()),
+                MeshMaterial3d(material_handle),
+                NoradId(norad),
+                Satellite,
+                SatelliteColor(entry.color),
+                Transform::from_xyz(EARTH_RADIUS_KM + 5000.0, 0.0, 0.0)
+                    .with_scale(Vec3::splat(config_bundle.render_cfg.sphere_radius)),
+                Visibility::Visible,
+                Name::new(format!("Satellite {norad}")),
+                SatelliteFlags {
+                    show_ground_track: entry.show_ground_track,
+                    show_trail: entry.show_trail,
+                    is_clicked: entry.is_clicked,
+                },
+            ));
+
+            // Add optional components
+            if let Some(name) = &entry.name {
+                entity_commands.insert(SatelliteName(name.clone()));
+            }
+            if let Some(tle) = &entry.tle {
+                entity_commands.insert(TleComponent(tle.clone()));
+            }
+            if let Some(propagator) = &entry.propagator {
+                entity_commands.insert(Propagator(propagator.clone()));
+            }
+            if let Some(error) = &entry.error {
+                entity_commands.insert(PropagationError(error.clone()));
+            }
+            if let Some(group_url) = &entry.group_url {
+                entity_commands.insert(SatelliteGroupUrl(group_url.clone()));
+            }
+
+            let entity = entity_commands.id();
             entry.entity = Some(entity);
+            norad_index.map.insert(norad, entity);
         }
     }
 }

@@ -127,3 +127,21 @@ pub struct SatelliteRenderAssets {
 pub struct GroupMaterialCache {
     pub materials: HashMap<String, Handle<StandardMaterial>>,
 }
+
+/// Resource for O(1) NORAD ID to Entity lookups
+#[derive(Resource, Default)]
+pub struct NoradIndex {
+    pub map: HashMap<u32, Entity>,
+}
+
+/// Resource for golden-angle color assignment
+#[derive(Resource)]
+pub struct ColorHueCounter {
+    pub next_hue: f32,
+}
+
+impl Default for ColorHueCounter {
+    fn default() -> Self {
+        Self { next_hue: 0.0 }
+    }
+}

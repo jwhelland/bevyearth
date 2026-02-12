@@ -1,7 +1,9 @@
 //! TLE processing systems
 
-use crate::satellite::SatelliteStore;
-use crate::satellite::resources::GroupRegistry;
+use crate::satellite::resources::{GroupRegistry, NoradIndex};
+use crate::satellite::{
+    Propagator, PropagationError, SatelliteName, SatelliteStore, TleComponent,
+};
 use crate::tle::parser::parse_tle_epoch_to_utc;
 use crate::tle::types::{FetchChannels, FetchResultMsg, TleData};
 use crate::ui::state::RightPanelUI;
@@ -12,7 +14,9 @@ pub fn process_fetch_results_system(
     mut store: ResMut<SatelliteStore>,
     mut right_ui: ResMut<RightPanelUI>,
     group_registry: Option<Res<GroupRegistry>>,
+    norad_index: Option<Res<NoradIndex>>,
     fetch: Option<Res<FetchChannels>>,
+    mut commands: Commands,
 ) {
     let Some(fetch) = fetch else { return };
     let Ok(guard) = fetch.res_rx.lock() else {
@@ -42,7 +46,15 @@ pub fn process_fetch_results_system(
                     ) {
                         Ok(elements) => match sgp4::Constants::from_elements(&elements) {
                             Ok(constants) => {
-                                s.propagator = Some(constants);
+                                s.propagator = Some(constants.clone());
+
+                                // Update entity components if entity exists
+                                if let Some(norad_index) = &norad_index {
+                                    if let Some(&entity) = norad_index.map.get(&norad) {
+                                        commands.entity(entity).insert(Propagator(constants));
+                                        commands.entity(entity).remove::<PropagationError>();
+                                    }
+                                }
                             }
                             Err(e) => {
                                 s.propagator = None;
@@ -52,6 +64,16 @@ pub fn process_fetch_results_system(
                                     norad,
                                     s.error.as_deref().unwrap()
                                 );
+
+                                // Update entity with error
+                                if let Some(norad_index) = &norad_index {
+                                    if let Some(&entity) = norad_index.map.get(&norad) {
+                                        commands.entity(entity).remove::<Propagator>();
+                                        commands
+                                            .entity(entity)
+                                            .insert(PropagationError(e.to_string()));
+                                    }
+                                }
                             }
                         },
                         Err(e) => {
@@ -62,6 +84,28 @@ pub fn process_fetch_results_system(
                                 norad,
                                 s.error.as_deref().unwrap()
                             );
+
+                            // Update entity with error
+                            if let Some(norad_index) = &norad_index {
+                                if let Some(&entity) = norad_index.map.get(&norad) {
+                                    commands.entity(entity).remove::<Propagator>();
+                                    commands
+                                        .entity(entity)
+                                        .insert(PropagationError(e.to_string()));
+                                }
+                            }
+                        }
+                    }
+
+                    // Update name and TLE components on entity
+                    if let Some(norad_index) = &norad_index {
+                        if let Some(&entity) = norad_index.map.get(&norad) {
+                            if let Some(name) = &s.name {
+                                commands.entity(entity).insert(SatelliteName(name.clone()));
+                            }
+                            if let Some(tle) = &s.tle {
+                                commands.entity(entity).insert(TleComponent(tle.clone()));
+                            }
                         }
                     }
                 } else {
@@ -125,9 +169,20 @@ pub fn process_fetch_results_system(
                 );
                 if let Some(s) = store.items.get_mut(&norad) {
                     // keep existing name if any; record error and clear models
-                    s.error = Some(error);
+                    s.error = Some(error.clone());
                     s.tle = None;
                     s.propagator = None;
+
+                    // Update entity components
+                    if let Some(norad_index) = &norad_index {
+                        if let Some(&entity) = norad_index.map.get(&norad) {
+                            commands.entity(entity).remove::<TleComponent>();
+                            commands.entity(entity).remove::<Propagator>();
+                            commands
+                                .entity(entity)
+                                .insert(PropagationError(error.clone()));
+                        }
+                    }
                 } else {
                     eprintln!(
                         "[TLE DISPATCH] failure for unknown norad={} (not in store)",

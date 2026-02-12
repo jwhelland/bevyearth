@@ -9,10 +9,12 @@ pub mod components;
 pub mod resources;
 pub mod systems;
 
-pub use components::{Satellite, SatelliteColor};
+pub use components::{
+    Propagator, PropagationError, Satellite, SatelliteColor, SatelliteName, TleComponent,
+};
 pub use resources::{
-    GroupMaterialCache, OrbitTrailConfig, SatEntry, SatelliteRenderConfig, SatelliteStore,
-    SelectedSatellite,
+    ColorHueCounter, GroupMaterialCache, NoradIndex, OrbitTrailConfig, SatEntry,
+    SatelliteRenderConfig, SatelliteStore, SelectedSatellite,
 };
 pub use systems::{
     draw_orbit_trails_system, init_satellite_render_assets, move_camera_to_satellite,
@@ -29,6 +31,8 @@ impl Plugin for SatellitePlugin {
         app.init_resource::<SatelliteStore>()
             .init_resource::<SelectedSatellite>()
             .init_resource::<GroupMaterialCache>()
+            .init_resource::<NoradIndex>()
+            .init_resource::<ColorHueCounter>()
             .insert_resource(crate::ui::groups::initialize_group_registry())
             // OrbitTrailConfig and SatelliteRenderConfig are now in UiConfigBundle
             .add_systems(Startup, init_satellite_render_assets)
@@ -46,5 +50,6 @@ impl Plugin for SatellitePlugin {
                     satellite_click_system,
                 ),
             );
+        // TODO Phase 3: Add observer for automatic NoradIndex cleanup on entity despawn
     }
 }
