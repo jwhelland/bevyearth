@@ -1,6 +1,5 @@
 //! Satellite resources for managing satellite data
 
-use crate::tle::TleData;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -18,43 +17,6 @@ pub struct SatelliteGroup {
 pub struct GroupRegistry {
     /// Maps group URL to group metadata
     pub groups: HashMap<String, SatelliteGroup>,
-}
-
-/// Resource for storing satellite data and state
-#[derive(Resource)]
-pub struct SatelliteStore {
-    pub items: HashMap<u32, SatEntry>,
-    pub next_color_hue: f32,
-}
-
-impl Default for SatelliteStore {
-    fn default() -> Self {
-        Self {
-            items: HashMap::new(),
-            next_color_hue: 0.0,
-        }
-    }
-}
-
-/// Individual satellite entry with all associated data
-pub struct SatEntry {
-    pub name: Option<String>,
-    pub color: Color,
-    pub entity: Option<Entity>,
-    /// Fetched TLE data
-    pub tle: Option<TleData>,
-    /// SGP4 propagator constants
-    pub propagator: Option<sgp4::Constants>,
-    /// Last error message if any
-    pub error: Option<String>,
-    /// Whether to show ground track for this satellite
-    pub show_ground_track: bool,
-    /// Whether to show orbit trail for this satellite
-    pub show_trail: bool,
-    /// Whether this satellite is currently clicked/selected for display
-    pub is_clicked: bool,
-    /// The group URL this satellite belongs to (for color assignment)
-    pub group_url: Option<String>,
 }
 
 /// Resource for configuring orbit trail behavior
