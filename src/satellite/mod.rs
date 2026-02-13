@@ -32,7 +32,7 @@ impl Plugin for SatellitePlugin {
             .init_resource::<ColorHueCounter>()
             .insert_resource(crate::ui::groups::initialize_group_registry())
             // OrbitTrailConfig and SatelliteRenderConfig are now in UiConfigBundle
-            .add_systems(Startup, init_satellite_render_assets)
+            .add_systems(Startup, (init_satellite_render_assets, spawn_default_satellites).chain())
             .add_systems(
                 Update,
                 (
@@ -48,4 +48,37 @@ impl Plugin for SatellitePlugin {
                 ),
             );
     }
+}
+
+fn spawn_default_satellites(
+    mut commands: Commands,
+    mut norad_index: ResMut<NoradIndex>,
+    mut hue_counter: ResMut<ColorHueCounter>,
+    fetch_channels: Option<Res<crate::tle::FetchChannels>>,
+) {
+    const ISS_NORAD: u32 = 25_544;
+
+    if norad_index.map.contains_key(&ISS_NORAD) {
+        return;
+    }
+
+    let hue = hue_counter.next_hue;
+    hue_counter.next_hue = (hue + 0.618034).fract();
+    let color = Color::hsl(hue * 360.0, 0.75, 0.65);
+
+    let entity = commands
+        .spawn((
+            crate::satellite::components::Satellite,
+            crate::satellite::components::NoradId(ISS_NORAD),
+            crate::satellite::components::SatelliteColor(color),
+            crate::satellite::components::SatelliteFlags::default(),
+        ))
+        .id();
+
+    norad_index.map.insert(ISS_NORAD, entity);
+
+    if let Some(fetch) = fetch_channels
+        && let Err(err) = fetch.cmd_tx.send(crate::tle::FetchCommand::Fetch(ISS_NORAD)) {
+            eprintln!("[ISS] Failed to request TLE: {}", err);
+        }
 }

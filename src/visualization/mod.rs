@@ -14,6 +14,7 @@ pub mod earth;
 pub mod ground_track;
 pub mod ground_track_gizmo;
 pub mod heatmap;
+pub mod launches;
 pub mod lighting;
 pub mod moon;
 pub mod sky_material;
@@ -32,6 +33,8 @@ pub use ground_track::{GroundTrackConfig, GroundTrackPlugin};
 pub use ground_track_gizmo::{GroundTrackGizmoConfig, GroundTrackGizmoPlugin};
 #[allow(unused_imports)]
 pub use heatmap::{HeatmapConfig, HeatmapPlugin, RangeMode};
+#[allow(unused_imports)]
+pub use launches::LaunchesPlugin;
 #[allow(unused_imports)]
 pub use lighting::SunLight;
 #[allow(unused_imports)]

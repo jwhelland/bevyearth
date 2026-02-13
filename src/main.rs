@@ -61,6 +61,7 @@ use bevy_feathers::{FeathersPlugins, dark_theme::create_dark_theme, palette, the
 use bevy_input_focus::directional_navigation::DirectionalNavigationPlugin;
 
 mod core;
+mod launch_library;
 mod orbital;
 mod satellite;
 mod space_weather;
@@ -100,6 +101,14 @@ use space_weather::SpaceWeatherPlugin;
     ),
     all(feature = "debug_basic_scene", feature = "debug_scene_camera")
 ))]
+use launch_library::LaunchLibraryPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use tle::TlePlugin;
 #[cfg(any(
     all(
@@ -120,7 +129,7 @@ use ui::{SkyboxPlugin, skybox::Cubemap};
 ))]
 use visualization::{
     CitiesPlugin, EarthPlugin, GroundTrackGizmoPlugin, GroundTrackPlugin, HeatmapPlugin,
-    MoonPlugin, ShowAxes, SunLight, VisualizationPlugin,
+    LaunchesPlugin, MoonPlugin, ShowAxes, SunLight, VisualizationPlugin,
 };
 
 #[cfg(all(
@@ -518,9 +527,11 @@ fn main() {
         app.add_plugins(SatellitePlugin);
         app.add_plugins(TlePlugin);
         app.add_plugins(SpaceWeatherPlugin);
+        app.add_plugins(LaunchLibraryPlugin);
         app.add_plugins(UiPlugin);
         app.add_plugins(SkyboxPlugin);
         app.add_plugins(VisualizationPlugin);
+        app.add_plugins(LaunchesPlugin);
         app.add_plugins(GroundTrackPlugin);
         app.add_plugins(GroundTrackGizmoPlugin);
         app.add_plugins(HeatmapPlugin);

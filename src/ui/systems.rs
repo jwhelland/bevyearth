@@ -11,7 +11,7 @@ use bevy::input::{ButtonInput, ButtonState};
 use bevy::picking::Pickable;
 use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
 use bevy::prelude::*;
-use bevy::text::TextColor;
+use bevy::text::{TextColor, TextLayout};
 use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui::{BackgroundGradient, Checked, Gradient, IsDefaultUiCamera, RelativeCursorPosition};
@@ -29,13 +29,15 @@ use bevy_feathers::tokens;
 use bevy_input_focus::{FocusedInput, InputFocus, InputFocusVisible, tab_navigation::TabIndex};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 use bevy_ui_widgets::{
-    Activate, Slider, SliderPrecision, SliderRange, SliderStep, SliderValue, ValueChange,
-    checkbox_self_update, slider_self_update,
+    Activate, Button as UiWidgetButton, Slider, SliderPrecision, SliderRange, SliderStep,
+    SliderValue, ValueChange, checkbox_self_update, slider_self_update,
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
+use crate::core::coordinates::Coordinates;
 use crate::core::space::ecef_to_bevy_km;
+use crate::launch_library::{LaunchLibraryConfig, LaunchLibraryData, LaunchLibraryState};
 use crate::orbital::time::SimulationTime;
 use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
 use crate::satellite::components::{
@@ -48,7 +50,8 @@ use crate::space_weather::{AuroraGrid, KpIndex, SolarWind, SpaceWeatherConfig, S
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
 use crate::ui::state::{
-    CameraFocusState, CameraFocusTarget, CameraPose, RightPanelUI, UIState, UiLayoutState,
+    CameraFocusState, CameraFocusTarget, CameraPose, LaunchLibraryItemKind, LaunchLibrarySelection,
+    LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState,
 };
 use crate::visualization::{
     ArrowConfig, GroundTrackConfig, GroundTrackGizmoConfig, HeatmapConfig, RangeMode,
@@ -72,6 +75,8 @@ struct UiEntities {
     top_panel: Entity,
     bottom_panel: Entity,
     satellite_list: Entity,
+    launch_list: Entity,
+    event_list: Entity,
 }
 
 #[derive(Component)]
@@ -90,13 +95,25 @@ struct BottomPanel;
 struct SatelliteList;
 
 #[derive(Component)]
+struct LaunchList;
+
+#[derive(Component)]
+struct EventList;
+
+#[derive(Component)]
 struct GroupList;
 
 #[derive(Component)]
 struct RightPanelResizeHandle;
 
 #[derive(Component)]
+struct LeftPanelResizeHandle;
+
+#[derive(Component)]
 struct RightPanelScroll;
+
+#[derive(Component)]
+struct LeftPanelScroll;
 
 #[derive(Component)]
 pub struct MainCamera;
@@ -159,6 +176,27 @@ struct SpaceWeatherErrorText;
 struct AuroraStatusText;
 
 #[derive(Component)]
+struct LaunchLibraryUpdatedText;
+
+#[derive(Component)]
+struct LaunchLibraryErrorText;
+
+#[derive(Component)]
+struct LaunchLibraryPopupOverlay;
+
+#[derive(Component)]
+struct LaunchLibraryPopupTitle;
+
+#[derive(Component)]
+struct LaunchLibraryPopupBody;
+
+#[derive(Component)]
+struct LaunchLibraryItemButton {
+    kind: LaunchLibraryItemKind,
+    index: usize,
+}
+
+#[derive(Component)]
 struct TextInputField;
 
 #[derive(Component)]
@@ -187,6 +225,7 @@ enum CheckboxBinding {
     TracksAll,
     HeatmapEnabled,
     AuroraOverlay,
+    LaunchPadMarkers,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -225,6 +264,8 @@ enum ButtonAction {
     StopTracking,
     TimeNow,
     ToggleFocusTarget,
+    RefreshLaunchLibrary,
+    CloseLaunchPopup,
 }
 
 /// Component marker for color preview UI element
@@ -420,10 +461,12 @@ struct SyncWidgetStateParams<'w, 's> {
     config_bundle: Res<'w, UiConfigBundle>,
     heatmap_cfg: Res<'w, HeatmapConfig>,
     space_weather_cfg: Res<'w, SpaceWeatherConfig>,
+    launch_library_cfg: Res<'w, LaunchLibraryConfig>,
     camera_focus: Res<'w, CameraFocusState>,
     selected: Res<'w, SelectedSatellite>,
     sim_time: Res<'w, crate::orbital::SimulationTime>,
     right_ui: Res<'w, RightPanelUI>,
+    _launch_ui: Res<'w, LaunchLibraryUiState>,
     checkboxes: Query<'w, 's, (Entity, &'static CheckboxBinding, Option<&'static Checked>)>,
     range_modes: Query<'w, 's, (Entity, &'static RangeModeBinding, Option<&'static Checked>)>,
     group_choices: Query<'w, 's, (Entity, &'static GroupChoice, Option<&'static Checked>)>,
@@ -446,6 +489,7 @@ struct SyncWidgetStateParams<'w, 's> {
 struct ButtonActivateParams<'w, 's> {
     q_action: Query<'w, 's, &'static ButtonAction>,
     q_sat_action: Query<'w, 's, &'static SatelliteActionButton>,
+    q_launch_item: Query<'w, 's, &'static LaunchLibraryItemButton>,
     q_panel_toggle: Query<'w, 's, &'static PanelToggle>,
     right_ui: ResMut<'w, RightPanelUI>,
     norad_index: ResMut<'w, NoradIndex>,
@@ -459,6 +503,8 @@ struct ButtonActivateParams<'w, 's> {
     q_camera: MainCameraQuery<'w, 's>,
     commands: Commands<'w, 's>,
     fetch_channels: Option<Res<'w, FetchChannels>>,
+    launch_library_state: ResMut<'w, LaunchLibraryState>,
+    launch_ui: ResMut<'w, LaunchLibraryUiState>,
 }
 
 #[derive(SystemParam)]
@@ -470,6 +516,7 @@ struct CheckboxChangeParams<'w, 's> {
     config_bundle: ResMut<'w, UiConfigBundle>,
     heatmap_cfg: ResMut<'w, HeatmapConfig>,
     space_weather_cfg: ResMut<'w, SpaceWeatherConfig>,
+    launch_library_cfg: ResMut<'w, LaunchLibraryConfig>,
     // ECS query for satellite flags and components
     satellites:
         Query<'w, 's, (&'static mut SatelliteFlags, Option<&'static Propagator>), With<Satellite>>,
@@ -492,10 +539,15 @@ impl Plugin for UiSystemsPlugin {
                 apply_panel_visibility,
                 apply_panel_layout,
                 sync_panel_toggle_buttons,
+                scroll_left_panel_on_wheel,
                 scroll_right_panel_on_wheel,
                 update_time_display,
                 update_status_texts,
                 update_space_weather_texts,
+                update_launch_library_texts,
+                update_launch_library_popup,
+                focus_camera_on_launch_selection,
+                animate_launch_camera_focus,
                 update_text_input_display,
                 update_satellite_list_panel_width,
             ),
@@ -511,6 +563,7 @@ impl Plugin for UiSystemsPlugin {
                 // IMPORTANT: this despawns/spawns UI entities; it must run after any system
                 // that might queue commands targeting the current list rows.
                 update_satellite_list,
+                update_launch_library_lists,
                 enforce_orbitron_text,
                 manage_color_picker_system,
                 update_group_list_visuals,
@@ -547,6 +600,9 @@ impl Plugin for UiSystemsPlugin {
         .add_observer(handle_tooltip_toggle_click)
         .add_observer(handle_group_choice)
         .add_observer(handle_group_swatch_click)
+        .add_observer(handle_left_panel_resize_start)
+        .add_observer(handle_left_panel_resize_drag)
+        .add_observer(handle_left_panel_resize_end)
         .add_observer(handle_right_panel_resize_start)
         .add_observer(handle_right_panel_resize_drag)
         .add_observer(handle_right_panel_resize_end);
@@ -652,6 +708,7 @@ fn setup_ui(
     config_bundle: Res<UiConfigBundle>,
     heatmap_cfg: Res<HeatmapConfig>,
     space_weather_cfg: Res<SpaceWeatherConfig>,
+    _launch_library_cfg: Res<LaunchLibraryConfig>,
     selected: Res<SelectedSatellite>,
     sim_time: Res<crate::orbital::SimulationTime>,
     group_registry: Option<Res<crate::satellite::resources::GroupRegistry>>,
@@ -684,10 +741,8 @@ fn setup_ui(
                 left: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                width: Val::Px(280.0),
-                padding: UiRect::all(Val::Px(12.0)),
+                width: Val::Px(layout.left_panel_width_px),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
                 ..default()
             },
             BackgroundColor(PANEL_BG),
@@ -786,8 +841,107 @@ fn setup_ui(
     commands.entity(root).add_child(right_panel);
     commands.entity(root).add_child(top_panel);
     commands.entity(root).add_child(bottom_panel);
+    commands.entity(root).with_children(|parent| {
+        parent
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.55)),
+                Pickable::IGNORE,
+                ThemedText,
+                LaunchLibraryPopupOverlay,
+            ))
+            .with_children(|overlay| {
+                overlay
+                    .spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(8.0),
+                            width: Val::Px(420.0),
+                            padding: UiRect::all(Val::Px(12.0)),
+                            ..default()
+                        },
+                        BackgroundColor(PANEL_BG),
+                        ThemedText,
+                    ))
+                    .with_children(|popup| {
+                        popup
+                            .spawn((
+                                Node {
+                                    flex_direction: FlexDirection::Row,
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(8.0),
+                                    width: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                ThemedText,
+                            ))
+                            .with_children(|header| {
+                                header.spawn((
+                                    LaunchLibraryPopupTitle,
+                                    bevy::ui::widget::Text::new(""),
+                                    ThemedText,
+                                    TextFont {
+                                        font_size: 13.0,
+                                        ..default()
+                                    },
+                                    TextColor(PANEL_TEXT_ACCENT),
+                                ));
+                                header.spawn(Node {
+                                    flex_grow: 1.0,
+                                    min_width: Val::Px(0.0),
+                                    ..default()
+                                });
+                                spawn_fixed_button(
+                                    header,
+                                    40.0,
+                                    ButtonProps::default(),
+                                    (
+                                        ButtonAction::CloseLaunchPopup,
+                                        AutoDirectionalNavigation::default(),
+                                    ),
+                                    "Close",
+                                );
+                            });
+
+                        popup.spawn((
+                            LaunchLibraryPopupBody,
+                            bevy::ui::widget::Text::new(""),
+                            ThemedText,
+                            TextFont {
+                                font_size: 11.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgba(0.7, 0.8, 0.9, 0.85)),
+                        ));
+                    });
+            });
+    });
 
     commands.entity(left_panel).with_children(|panel| {
+        panel.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(-4.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(8.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.1, 0.14, 0.9)),
+            EntityCursor::System(SystemCursorIcon::EwResize),
+            RelativeCursorPosition::default(),
+            LeftPanelResizeHandle,
+        ));
         spawn_edge_glow(panel, Edge::Right);
         spawn_grid_overlay(panel);
     });
@@ -804,8 +958,56 @@ fn setup_ui(
         spawn_grid_overlay(panel);
     });
 
-    // Left panel contents
+    // Left panel lists
+    let mut launch_list = Entity::PLACEHOLDER;
+    let mut event_list = Entity::PLACEHOLDER;
+
+    // Left panel scroll container
+    let mut left_scroll = Entity::PLACEHOLDER;
     commands.entity(left_panel).with_children(|parent| {
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(6.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    min_height: Val::Px(0.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ThemedText,
+            ))
+            .with_children(|row| {
+                let scroll_entity = row
+                    .spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(8.0),
+                            width: Val::Auto,
+                            height: Val::Percent(100.0),
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            min_height: Val::Px(0.0),
+                            overflow: Overflow::scroll_y(),
+                            padding: UiRect::all(Val::Px(12.0)),
+                            ..default()
+                        },
+                        ScrollPosition::default(),
+                        RelativeCursorPosition::default(),
+                        Pickable::IGNORE,
+                        ThemedText,
+                        LeftPanelScroll,
+                    ))
+                    .id();
+
+                spawn_scrollbar_fill(row, scroll_entity);
+                left_scroll = scroll_entity;
+            });
+    });
+
+    // Left panel contents
+    commands.entity(left_scroll).with_children(|parent| {
         parent.spawn((
             bevy::ui::widget::Text::new("Space Weather"),
             ThemedText,
@@ -900,6 +1102,146 @@ fn setup_ui(
                 ThemedText,
                 TextColor(Color::srgb(1.0, 0.35, 0.35)),
             ));
+        });
+
+        let _ = spawn_section(parent, "Launches & Events", false, |section| {
+            section
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        width: Val::Percent(100.0),
+                        ..default()
+                    },
+                    ThemedText,
+                ))
+                .with_children(|row| {
+                    row.spawn((checkbox(
+                        (
+                            CheckboxBinding::LaunchPadMarkers,
+                            AutoDirectionalNavigation::default(),
+                        ),
+                        Spawn((bevy::ui::widget::Text::new("Show pad markers"), ThemedText)),
+                    ),));
+                    spawn_fixed_button(
+                        row,
+                        72.0,
+                        ButtonProps::default(),
+                        (
+                            ButtonAction::RefreshLaunchLibrary,
+                            AutoDirectionalNavigation::default(),
+                        ),
+                        "Refresh",
+                    );
+                });
+
+            section.spawn((
+                LaunchLibraryUpdatedText,
+                bevy::ui::widget::Text::new("Updated: --"),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.6, 0.7, 0.8, 0.85)),
+            ));
+            section.spawn((
+                LaunchLibraryErrorText,
+                bevy::ui::widget::Text::new(""),
+                ThemedText,
+                TextColor(Color::srgb(1.0, 0.35, 0.35)),
+            ));
+
+            section.spawn((
+                bevy::ui::widget::Text::new("Upcoming Launches"),
+                ThemedText,
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(PANEL_TEXT_ACCENT),
+            ));
+
+            section
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(6.0),
+                        height: Val::Px(140.0),
+                        width: Val::Percent(100.0),
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    },
+                    ThemedText,
+                ))
+                .with_children(|container| {
+                    let list_entity = container
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(4.0),
+                                width: Val::Percent(100.0),
+                                min_width: Val::Px(0.0),
+                                height: Val::Px(140.0),
+                                overflow: Overflow::scroll_y(),
+                                padding: UiRect::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            ScrollPosition::default(),
+                            ThemedText,
+                            LaunchList,
+                        ))
+                        .id();
+
+                    spawn_scrollbar(container, list_entity, 140.0);
+                    launch_list = list_entity;
+                });
+
+            section.spawn((
+                bevy::ui::widget::Text::new("Upcoming Events"),
+                ThemedText,
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(PANEL_TEXT_ACCENT),
+            ));
+
+            section
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(6.0),
+                        height: Val::Px(120.0),
+                        width: Val::Percent(100.0),
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    },
+                    ThemedText,
+                ))
+                .with_children(|container| {
+                    let list_entity = container
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(4.0),
+                                width: Val::Percent(100.0),
+                                min_width: Val::Px(0.0),
+                                height: Val::Px(120.0),
+                                overflow: Overflow::scroll_y(),
+                                padding: UiRect::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            ScrollPosition::default(),
+                            ThemedText,
+                            EventList,
+                        ))
+                        .id();
+
+                    spawn_scrollbar(container, list_entity, 120.0);
+                    event_list = list_entity;
+                });
         });
 
         let _ = spawn_section(parent, "City → Sat Vis", false, |section| {
@@ -1707,6 +2049,8 @@ fn setup_ui(
         top_panel,
         bottom_panel,
         satellite_list,
+        launch_list,
+        event_list,
     });
 }
 
@@ -2667,6 +3011,7 @@ fn apply_panel_layout(
     if let Ok(mut node) = panels.get_mut(ui_entities.left_panel) {
         node.top = top;
         node.bottom = bottom;
+        node.width = Val::Px(layout.left_panel_width_px);
     }
 
     if let Ok(mut node) = panels.get_mut(ui_entities.right_panel) {
@@ -2680,6 +3025,37 @@ fn scroll_right_panel_on_wheel(
     mut wheel_events: MessageReader<MouseWheel>,
     q_scroll: Query<&RelativeCursorPosition, With<RightPanelScroll>>,
     mut scroll_positions: Query<&mut ScrollPosition, With<RightPanelScroll>>,
+) {
+    let mut delta: f32 = 0.0;
+    for ev in wheel_events.read() {
+        let step = match ev.unit {
+            MouseScrollUnit::Line => ev.y * 20.0,
+            MouseScrollUnit::Pixel => ev.y,
+        };
+        delta += step;
+    }
+
+    if delta.abs() < f32::EPSILON {
+        return;
+    }
+
+    let Ok(cursor) = q_scroll.single() else {
+        return;
+    };
+
+    if !cursor.cursor_over {
+        return;
+    }
+
+    if let Ok(mut scroll) = scroll_positions.single_mut() {
+        scroll.0.y = (scroll.0.y - delta).max(0.0);
+    }
+}
+
+fn scroll_left_panel_on_wheel(
+    mut wheel_events: MessageReader<MouseWheel>,
+    q_scroll: Query<&RelativeCursorPosition, With<LeftPanelScroll>>,
+    mut scroll_positions: Query<&mut ScrollPosition, With<LeftPanelScroll>>,
 ) {
     let mut delta: f32 = 0.0;
     for ev in wheel_events.read() {
@@ -3033,6 +3409,246 @@ fn update_space_weather_texts(
     }
 }
 
+fn update_launch_library_texts(
+    data: Res<LaunchLibraryData>,
+    state: Res<LaunchLibraryState>,
+    mut texts: ParamSet<(
+        Query<&mut bevy::ui::widget::Text, With<LaunchLibraryUpdatedText>>,
+        Query<&mut bevy::ui::widget::Text, With<LaunchLibraryErrorText>>,
+    )>,
+) {
+    if !data.is_changed() && !state.is_changed() {
+        return;
+    }
+
+    let latest = latest_time([state.last_launch_update, state.last_event_update, None]);
+    let counts = format!(
+        "Launches: {} | Events: {}",
+        data.launches.len(),
+        data.events.len()
+    );
+
+    for mut text in texts.p0().iter_mut() {
+        if state.is_loading_launches || state.is_loading_events {
+            text.0 = "Loading...".to_string();
+        } else {
+            let updated = format_time(latest);
+            text.0 = format!("Updated: {updated} ({counts})");
+        }
+    }
+
+    for mut text in texts.p1().iter_mut() {
+        let err = state
+            .launch_error
+            .as_deref()
+            .or(state.event_error.as_deref());
+        text.0 = err
+            .map(|e| format!("Data error: {}", e))
+            .unwrap_or_default();
+    }
+}
+
+fn update_launch_library_popup(
+    data: Res<LaunchLibraryData>,
+    launch_ui: Res<LaunchLibraryUiState>,
+    mut overlay_nodes: Query<&mut Node, With<LaunchLibraryPopupOverlay>>,
+    mut texts: ParamSet<(
+        Query<&mut bevy::ui::widget::Text, With<LaunchLibraryPopupTitle>>,
+        Query<&mut bevy::ui::widget::Text, With<LaunchLibraryPopupBody>>,
+    )>,
+) {
+    if !data.is_changed() && !launch_ui.is_changed() {
+        return;
+    }
+
+    let Ok(mut overlay) = overlay_nodes.single_mut() else {
+        return;
+    };
+
+    let Some(selection) = launch_ui.selection else {
+        overlay.display = Display::None;
+        return;
+    };
+
+    let (title, body) = match selection.kind {
+        LaunchLibraryItemKind::Launch => {
+            let Some(launch) = data.launches.get(selection.index) else {
+                overlay.display = Display::None;
+                return;
+            };
+
+            let mut lines = Vec::new();
+            lines.push(format!("NET: {}", format_time(launch.net_utc)));
+            if let Some(provider) = launch.provider_name.as_deref() {
+                lines.push(format!("Provider: {}", provider));
+            }
+            if let Some(mission) = launch.mission_name.as_deref() {
+                lines.push(format!("Mission: {}", mission));
+            }
+            if let Some(orbit) = launch.orbit_name.as_deref() {
+                lines.push(format!("Orbit: {}", orbit));
+            }
+            if let Some(pad) = launch.pad_name.as_deref() {
+                lines.push(format!("Pad: {}", pad));
+            }
+            if let Some(location) = launch.pad_location_name.as_deref() {
+                lines.push(format!("Location: {}", location));
+            }
+
+            (launch.name.clone(), lines.join("\n"))
+        }
+        LaunchLibraryItemKind::Event => {
+            let Some(event) = data.events.get(selection.index) else {
+                overlay.display = Display::None;
+                return;
+            };
+
+            let mut lines = Vec::new();
+            lines.push(format!("Date: {}", format_time(event.date_utc)));
+            if let Some(type_name) = event.type_name.as_deref() {
+                lines.push(format!("Type: {}", type_name));
+            }
+            if let Some(location) = event.location.as_deref() {
+                lines.push(format!("Location: {}", location));
+            }
+            if let Some(description) = event.description.as_deref() {
+                lines.push(String::new());
+                lines.push(description.to_string());
+            }
+
+            (event.name.clone(), lines.join("\n"))
+        }
+    };
+
+    overlay.display = Display::Flex;
+
+    for mut text in texts.p0().iter_mut() {
+        text.0 = title.clone();
+    }
+
+    for mut text in texts.p1().iter_mut() {
+        text.0 = body.clone();
+    }
+}
+
+fn focus_camera_on_launch_selection(
+    mut launch_ui: ResMut<LaunchLibraryUiState>,
+    data: Res<LaunchLibraryData>,
+    mut camera_focus: ResMut<CameraFocusState>,
+    mut selected: ResMut<SelectedSatellite>,
+    mut q_camera: MainCameraQuery<'_, '_>,
+) {
+    if !launch_ui.is_changed() {
+        return;
+    }
+
+    let Some(selection) = launch_ui.selection else {
+        return;
+    };
+
+    if selection.kind != LaunchLibraryItemKind::Launch {
+        return;
+    }
+
+    let Some(launch) = data.launches.get(selection.index) else {
+        return;
+    };
+
+    let (Some(lat), Some(lon)) = (launch.pad_lat, launch.pad_lon) else {
+        return;
+    };
+
+    let Ok(coords) = Coordinates::from_degrees(lat as f32, lon as f32) else {
+        return;
+    };
+    let ecef = coords.get_point_on_sphere_ecef_km_dvec();
+    let bevy_pos = ecef_to_bevy_km(ecef);
+    let mut dir = bevy_pos.normalize_or_zero();
+    if dir.length_squared() < 1e-6 {
+        dir = Vec3::Z;
+    }
+
+    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
+        selected.tracking = None;
+        selected.selected = None;
+        camera_focus.target = CameraFocusTarget::Earth;
+
+        let current_radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
+        let target_radius = current_radius.min(9_000.0);
+        let pitch = dir.y.asin();
+        let yaw = dir.x.atan2(dir.z);
+        let pose = CameraPose {
+            radius: target_radius,
+            yaw,
+            pitch,
+        };
+        launch_ui.camera_target = Some(pose);
+        poc.target_radius = target_radius;
+        poc.target_pitch = pitch;
+        poc.target_yaw = yaw;
+        poc.focus = Vec3::ZERO;
+        poc.force_update = true;
+        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+    }
+}
+
+fn animate_launch_camera_focus(
+    time: Res<Time>,
+    mut launch_ui: ResMut<LaunchLibraryUiState>,
+    mut q_camera: MainCameraQuery<'_, '_>,
+) {
+    let Some(target) = launch_ui.camera_target else {
+        return;
+    };
+
+    let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() else {
+        return;
+    };
+
+    let dt = time.delta_secs();
+    let smooth_factor = 0.12_f32;
+    let lerp = 1.0_f32 - (1.0_f32 - smooth_factor).powf(dt * 60.0);
+
+    let mut radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
+    let mut pitch = poc.pitch.unwrap_or(poc.target_pitch);
+    let mut yaw = poc.yaw.unwrap_or(poc.target_yaw);
+
+    let mut yaw_diff = target.yaw - yaw;
+    if yaw_diff > std::f32::consts::PI {
+        yaw_diff -= 2.0 * std::f32::consts::PI;
+    } else if yaw_diff < -std::f32::consts::PI {
+        yaw_diff += 2.0 * std::f32::consts::PI;
+    }
+
+    radius += (target.radius - radius) * lerp;
+    pitch += (target.pitch - pitch) * lerp;
+    yaw += yaw_diff * lerp;
+
+    poc.radius = Some(radius);
+    poc.pitch = Some(pitch);
+    poc.yaw = Some(yaw);
+    poc.focus = Vec3::ZERO;
+    poc.target_radius = target.radius;
+    poc.target_pitch = target.pitch;
+    poc.target_yaw = target.yaw;
+    poc.force_update = true;
+
+    let camera_pos = Vec3::new(
+        radius * pitch.cos() * yaw.sin(),
+        radius * pitch.sin(),
+        radius * pitch.cos() * yaw.cos(),
+    );
+    cam_transform.translation = camera_pos;
+    cam_transform.look_at(Vec3::ZERO, Vec3::Y);
+
+    let done = (radius - target.radius).abs() < 5.0
+        && (pitch - target.pitch).abs() < 0.002
+        && (yaw - target.yaw).abs() < 0.002;
+    if done {
+        launch_ui.camera_target = None;
+    }
+}
+
 fn format_time(timestamp: Option<DateTime<Utc>>) -> String {
     timestamp
         .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
@@ -3041,6 +3657,282 @@ fn format_time(timestamp: Option<DateTime<Utc>>) -> String {
 
 fn latest_time(times: [Option<DateTime<Utc>>; 3]) -> Option<DateTime<Utc>> {
     times.into_iter().flatten().max()
+}
+
+fn update_launch_library_lists(
+    data: Res<LaunchLibraryData>,
+    launch_ui: Res<LaunchLibraryUiState>,
+    ui_entities: Res<UiEntities>,
+    children: Query<&Children>,
+    mut commands: Commands,
+) {
+    if !data.is_changed() && !launch_ui.is_changed() {
+        return;
+    }
+
+    clear_list_children(ui_entities.launch_list, &children, &mut commands);
+    commands
+        .entity(ui_entities.launch_list)
+        .with_children(|parent| {
+            if data.launches.is_empty() {
+                parent.spawn((
+                    bevy::ui::widget::Text::new("No upcoming launches."),
+                    ThemedText,
+                    TextFont {
+                        font_size: 11.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.6, 0.7, 0.8, 0.75)),
+                ));
+            } else {
+                for (index, launch) in data.launches.iter().enumerate() {
+                    let selected = launch_ui.selection.is_some_and(|sel| {
+                        sel.kind == LaunchLibraryItemKind::Launch && sel.index == index
+                    });
+                    spawn_launch_row(parent, launch, index, selected);
+                }
+            }
+        });
+
+    clear_list_children(ui_entities.event_list, &children, &mut commands);
+    commands
+        .entity(ui_entities.event_list)
+        .with_children(|parent| {
+            if data.events.is_empty() {
+                parent.spawn((
+                    bevy::ui::widget::Text::new("No upcoming events."),
+                    ThemedText,
+                    TextFont {
+                        font_size: 11.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.6, 0.7, 0.8, 0.75)),
+                ));
+            } else {
+                for (index, event) in data.events.iter().enumerate() {
+                    let selected = launch_ui.selection.is_some_and(|sel| {
+                        sel.kind == LaunchLibraryItemKind::Event && sel.index == index
+                    });
+                    spawn_event_row(parent, event, index, selected);
+                }
+            }
+        });
+}
+
+fn clear_list_children(list_entity: Entity, children: &Query<&Children>, commands: &mut Commands) {
+    if let Ok(list_children) = children.get(list_entity) {
+        for child in list_children.iter() {
+            commands.entity(child).despawn_children();
+            commands.entity(child).despawn();
+        }
+    }
+}
+
+fn spawn_launch_row(
+    parent: &mut ChildSpawnerCommands,
+    launch: &crate::launch_library::LaunchSummary,
+    index: usize,
+    selected: bool,
+) {
+    let net = format_time(launch.net_utc);
+    let header = truncate_text(&format!("{net} • {}", launch.name), 72);
+    let pad = launch.pad_name.as_deref().unwrap_or("Pad TBD");
+    let location = launch
+        .pad_location_name
+        .as_deref()
+        .unwrap_or("Location TBD");
+    let details = truncate_text(&format!("{pad} ({location})"), 70);
+
+    let mut info_parts = Vec::new();
+    if let Some(provider) = launch.provider_name.as_deref() {
+        info_parts.push(provider);
+    }
+    if let Some(mission) = launch.mission_name.as_deref() {
+        info_parts.push(mission);
+    }
+    if let Some(orbit) = launch.orbit_name.as_deref() {
+        info_parts.push(orbit);
+    }
+    let info_line = if info_parts.is_empty() {
+        None
+    } else {
+        Some(truncate_text(&info_parts.join(" • "), 70))
+    };
+
+    let bg = launch_row_color(index, selected);
+
+    parent
+        .spawn((
+            UiWidgetButton,
+            LaunchLibraryItemButton {
+                kind: LaunchLibraryItemKind::Launch,
+                index,
+            },
+            AutoDirectionalNavigation::default(),
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                width: Val::Percent(100.0),
+                height: Val::Auto,
+                min_height: Val::Px(46.0),
+                padding: UiRect::all(Val::Px(6.0)),
+                align_items: AlignItems::FlexStart,
+                justify_content: JustifyContent::FlexStart,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(bg),
+            EntityCursor::System(SystemCursorIcon::Pointer),
+            RelativeCursorPosition::default(),
+            Pickable::default(),
+            ThemedText,
+        ))
+        .with_children(|row| {
+            row.spawn((
+                bevy::ui::widget::Text::new(header),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextLayout::new_with_no_wrap(),
+            ));
+            row.spawn((
+                bevy::ui::widget::Text::new(details),
+                ThemedText,
+                TextFont {
+                    font_size: 10.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.6, 0.7, 0.8, 0.75)),
+                TextLayout::new_with_no_wrap(),
+            ));
+            if let Some(info) = info_line {
+                row.spawn((
+                    bevy::ui::widget::Text::new(info),
+                    ThemedText,
+                    TextFont {
+                        font_size: 10.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.55, 0.65, 0.78, 0.7)),
+                    TextLayout::new_with_no_wrap(),
+                ));
+            }
+        })
+        .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
+}
+
+fn spawn_event_row(
+    parent: &mut ChildSpawnerCommands,
+    event: &crate::launch_library::EventSummary,
+    index: usize,
+    selected: bool,
+) {
+    let date = format_time(event.date_utc);
+    let header = truncate_text(&format!("{date} • {}", event.name), 72);
+    let type_name = event.type_name.as_deref().unwrap_or("Event");
+    let location = event.location.as_deref().unwrap_or("Location TBD");
+    let details = truncate_text(&format!("{type_name} • {location}"), 70);
+    let desc = event
+        .description
+        .as_deref()
+        .map(|text| truncate_text(text, 96));
+
+    let bg = event_row_color(index, selected);
+
+    parent
+        .spawn((
+            UiWidgetButton,
+            LaunchLibraryItemButton {
+                kind: LaunchLibraryItemKind::Event,
+                index,
+            },
+            AutoDirectionalNavigation::default(),
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                width: Val::Percent(100.0),
+                height: Val::Auto,
+                min_height: Val::Px(46.0),
+                padding: UiRect::all(Val::Px(6.0)),
+                align_items: AlignItems::FlexStart,
+                justify_content: JustifyContent::FlexStart,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(bg),
+            EntityCursor::System(SystemCursorIcon::Pointer),
+            RelativeCursorPosition::default(),
+            Pickable::default(),
+            ThemedText,
+        ))
+        .with_children(|row| {
+            row.spawn((
+                bevy::ui::widget::Text::new(header),
+                ThemedText,
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextLayout::new_with_no_wrap(),
+            ));
+            row.spawn((
+                bevy::ui::widget::Text::new(details),
+                ThemedText,
+                TextFont {
+                    font_size: 10.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.6, 0.7, 0.8, 0.75)),
+                TextLayout::new_with_no_wrap(),
+            ));
+            if let Some(desc) = desc
+                && !desc.trim().is_empty() {
+                    row.spawn((
+                        bevy::ui::widget::Text::new(desc),
+                        ThemedText,
+                        TextFont {
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.55, 0.65, 0.78, 0.7)),
+                        TextLayout::new_with_no_wrap(),
+                    ));
+                }
+        })
+        .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_len {
+        return text.to_string();
+    }
+    let safe_len = max_len.saturating_sub(3);
+    let mut trimmed: String = text.chars().take(safe_len).collect();
+    trimmed.push_str("...");
+    trimmed
+}
+
+fn launch_row_color(index: usize, selected: bool) -> Color {
+    if selected {
+        Color::srgba(0.12, 0.32, 0.36, 0.95)
+    } else if index.is_multiple_of(2) {
+        Color::srgba(0.06, 0.08, 0.11, 0.92)
+    } else {
+        Color::srgba(0.09, 0.12, 0.16, 0.92)
+    }
+}
+
+fn event_row_color(index: usize, selected: bool) -> Color {
+    if selected {
+        Color::srgba(0.12, 0.3, 0.34, 0.95)
+    } else if index.is_multiple_of(2) {
+        Color::srgba(0.06, 0.08, 0.11, 0.92)
+    } else {
+        Color::srgba(0.09, 0.12, 0.16, 0.92)
+    }
 }
 
 fn handle_group_loading_text(
@@ -3455,6 +4347,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         || params.config_bundle.is_changed()
         || params.heatmap_cfg.is_changed()
         || params.space_weather_cfg.is_changed()
+        || params.launch_library_cfg.is_changed()
         || params.camera_focus.is_changed()
         || params.selected.is_changed()
         || params.sim_time.is_changed()
@@ -3501,6 +4394,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
                 }
                 CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled,
                 CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled,
+                CheckboxBinding::LaunchPadMarkers => params.launch_library_cfg.show_pad_markers,
             };
 
             match (should_check, checked.is_some()) {
@@ -3686,6 +4580,14 @@ fn resolve_moon_focus(sim_time: &SimulationTime, dut1: &Dut1, moon_pos: &MoonEce
 }
 
 fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_, '_>) {
+    if let Ok(item) = params.q_launch_item.get(ev.entity) {
+        params.launch_ui.selection = Some(LaunchLibrarySelection {
+            kind: item.kind,
+            index: item.index,
+        });
+        return;
+    }
+
     if let Ok(action) = params.q_action.get(ev.entity) {
         match action {
             ButtonAction::LoadGroup => {
@@ -3765,6 +4667,12 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                         }
                     }
                 }
+            }
+            ButtonAction::RefreshLaunchLibrary => {
+                params.launch_library_state.force_refresh = true;
+            }
+            ButtonAction::CloseLaunchPopup => {
+                params.launch_ui.selection = None;
             }
         }
     }
@@ -3866,6 +4774,9 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
             }
             CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled = ev.value,
             CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled = ev.value,
+            CheckboxBinding::LaunchPadMarkers => {
+                params.launch_library_cfg.show_pad_markers = ev.value
+            }
         }
         return;
     }
@@ -4209,6 +5120,46 @@ fn handle_right_panel_resize_end(
     }
 
     layout.resizing_right_panel = false;
+}
+
+fn handle_left_panel_resize_start(
+    ev: On<Pointer<DragStart>>,
+    q_handle: Query<(), With<LeftPanelResizeHandle>>,
+    mut layout: ResMut<UiLayoutState>,
+) {
+    if !q_handle.contains(ev.entity) {
+        return;
+    }
+
+    layout.resizing_left_panel = true;
+    layout.left_resize_start_width_px = layout.left_panel_width_px;
+}
+
+fn handle_left_panel_resize_drag(
+    ev: On<Pointer<Drag>>,
+    q_handle: Query<(), With<LeftPanelResizeHandle>>,
+    mut layout: ResMut<UiLayoutState>,
+) {
+    if !q_handle.contains(ev.entity) || !layout.resizing_left_panel {
+        return;
+    }
+
+    let drag = ev.event();
+    let width = (layout.left_resize_start_width_px + drag.distance.x)
+        .clamp(layout.left_panel_min_px, layout.left_panel_max_px);
+    layout.left_panel_width_px = width;
+}
+
+fn handle_left_panel_resize_end(
+    ev: On<Pointer<DragEnd>>,
+    q_handle: Query<(), With<LeftPanelResizeHandle>>,
+    mut layout: ResMut<UiLayoutState>,
+) {
+    if !q_handle.contains(ev.entity) {
+        return;
+    }
+
+    layout.resizing_left_panel = false;
 }
 
 fn navigate_focus_with_arrows(

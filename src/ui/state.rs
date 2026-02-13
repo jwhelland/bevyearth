@@ -30,6 +30,11 @@ impl Default for UIState {
 /// Layout state for resizable UI panels
 #[derive(Resource)]
 pub struct UiLayoutState {
+    pub left_panel_width_px: f32,
+    pub left_panel_min_px: f32,
+    pub left_panel_max_px: f32,
+    pub left_resize_start_width_px: f32,
+    pub resizing_left_panel: bool,
     pub right_panel_width_px: f32,
     pub right_panel_min_px: f32,
     pub right_panel_max_px: f32,
@@ -40,6 +45,11 @@ pub struct UiLayoutState {
 impl Default for UiLayoutState {
     fn default() -> Self {
         Self {
+            left_panel_width_px: 280.0,
+            left_panel_min_px: 220.0,
+            left_panel_max_px: 420.0,
+            left_resize_start_width_px: 280.0,
+            resizing_left_panel: false,
             right_panel_width_px: 360.0,
             right_panel_min_px: 280.0,
             right_panel_max_px: 520.0,
@@ -47,6 +57,24 @@ impl Default for UiLayoutState {
             resizing_right_panel: false,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaunchLibraryItemKind {
+    Launch,
+    Event,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LaunchLibrarySelection {
+    pub kind: LaunchLibraryItemKind,
+    pub index: usize,
+}
+
+#[derive(Resource, Default)]
+pub struct LaunchLibraryUiState {
+    pub selection: Option<LaunchLibrarySelection>,
+    pub camera_target: Option<CameraPose>,
 }
 
 /// Right panel UI state
