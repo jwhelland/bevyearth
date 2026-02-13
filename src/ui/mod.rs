@@ -11,9 +11,7 @@ pub mod state;
 pub mod systems;
 
 pub use skybox::SkyboxPlugin;
-pub use state::{
-    CameraFocusState, LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState,
-};
+pub use state::{CameraFocusState, LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState};
 #[allow(unused_imports)]
 pub use systems::MainCamera;
 pub use systems::UiConfigBundle;

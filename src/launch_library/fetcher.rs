@@ -96,15 +96,16 @@ fn parse_launches(body: &str) -> Result<Vec<LaunchSummary>> {
         let pad_name = pad.and_then(|p| get_string(p, "name"));
         let pad_lat = pad.and_then(|p| get_f64(p, "latitude"));
         let pad_lon = pad.and_then(|p| get_f64(p, "longitude"));
-        let pad_location_name = pad
-            .and_then(|p| p.get("location"))
-            .and_then(extract_name);
+        let pad_location_name = pad.and_then(|p| p.get("location")).and_then(extract_name);
         let launch_location_name = item.get("location").and_then(extract_name);
 
         let provider_name = item
             .get("launch_service_provider")
             .and_then(|p| get_string(p, "name"))
-            .or_else(|| item.get("service_provider").and_then(|p| get_string(p, "name")));
+            .or_else(|| {
+                item.get("service_provider")
+                    .and_then(|p| get_string(p, "name"))
+            });
 
         let mission = item.get("mission");
         let mission_name = mission.and_then(|m| get_string(m, "name"));

@@ -75,7 +75,9 @@ pub fn apply_launch_library_results(
     channels: Option<Res<LaunchLibraryChannels>>,
 ) {
     let Some(channels) = channels else { return };
-    let Ok(guard) = channels.res_rx.lock() else { return };
+    let Ok(guard) = channels.res_rx.lock() else {
+        return;
+    };
 
     while let Ok(msg) = guard.try_recv() {
         match msg {
@@ -91,18 +93,16 @@ pub fn apply_launch_library_results(
                 state.is_loading_events = false;
                 state.event_error = None;
             }
-            LaunchLibraryResult::Error { feed, error } => {
-                match feed {
-                    LaunchLibraryFeed::Launches => {
-                        state.launch_error = Some(error);
-                        state.is_loading_launches = false;
-                    }
-                    LaunchLibraryFeed::Events => {
-                        state.event_error = Some(error);
-                        state.is_loading_events = false;
-                    }
+            LaunchLibraryResult::Error { feed, error } => match feed {
+                LaunchLibraryFeed::Launches => {
+                    state.launch_error = Some(error);
+                    state.is_loading_launches = false;
                 }
-            }
+                LaunchLibraryFeed::Events => {
+                    state.event_error = Some(error);
+                    state.is_loading_events = false;
+                }
+            },
         }
     }
 }
@@ -121,8 +121,7 @@ fn build_launches_url(config: &LaunchLibraryConfig, now: DateTime<Utc>) -> Strin
 }
 
 fn build_events_url(config: &LaunchLibraryConfig, now: DateTime<Utc>) -> String {
-    let mut url =
-        reqwest::Url::parse(&format!("{}/events/", config.base_url)).expect("events url");
+    let mut url = reqwest::Url::parse(&format!("{}/events/", config.base_url)).expect("events url");
     let end = now + Duration::days(config.window_days);
     url.query_pairs_mut()
         .append_pair("date__gte", &now.to_rfc3339())

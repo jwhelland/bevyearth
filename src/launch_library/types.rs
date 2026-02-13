@@ -92,5 +92,8 @@ pub enum LaunchLibraryCommand {
 pub enum LaunchLibraryResult {
     Launches(Vec<LaunchSummary>),
     Events(Vec<EventSummary>),
-    Error { feed: LaunchLibraryFeed, error: String },
+    Error {
+        feed: LaunchLibraryFeed,
+        error: String,
+    },
 }

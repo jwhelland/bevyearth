@@ -77,6 +77,14 @@ mod visualization;
     ),
     all(feature = "debug_basic_scene", feature = "debug_scene_camera")
 ))]
+use launch_library::LaunchLibraryPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
 use orbital::OrbitalPlugin;
 #[cfg(any(
     all(
@@ -94,14 +102,6 @@ use satellite::SatellitePlugin;
     all(feature = "debug_basic_scene", feature = "debug_scene_camera")
 ))]
 use space_weather::SpaceWeatherPlugin;
-#[cfg(any(
-    all(
-        not(feature = "debug_basic_scene"),
-        not(feature = "debug_scene_camera")
-    ),
-    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
-))]
-use launch_library::LaunchLibraryPlugin;
 #[cfg(any(
     all(
         not(feature = "debug_basic_scene"),

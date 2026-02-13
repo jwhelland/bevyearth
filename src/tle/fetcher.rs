@@ -1,8 +1,10 @@
 // TLE fetching functionality
 
+use crate::tle::cache::{CachedTle, TleCache};
 use crate::tle::parser::parse_tle_epoch_to_utc;
 use crate::tle::types::{FetchChannels, FetchCommand, FetchResultMsg};
 use chrono::Utc;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
@@ -12,6 +14,18 @@ struct TleEntry {
     line1: String,
     line2: String,
     norad: u32,
+}
+
+/// Send a cached TLE entry as a success result
+fn send_cached_result(tx: &Sender<FetchResultMsg>, cached: CachedTle) {
+    let _ = tx.send(FetchResultMsg::Success {
+        norad: cached.norad,
+        name: cached.name,
+        line1: cached.line1,
+        line2: cached.line2,
+        epoch_utc: cached.epoch_utc,
+        group: None, // Cached entries don't track group association
+    });
 }
 
 /// Clean a TLE response body: strip BOM, CRLF, leading/trailing whitespace,
@@ -65,7 +79,7 @@ fn parse_tle_pairs(lines: &[String]) -> Vec<TleEntry> {
 }
 
 /// Start the background TLE worker thread
-pub fn start_tle_worker() -> FetchChannels {
+pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> FetchChannels {
     let (cmd_tx, cmd_rx) = mpsc::channel::<FetchCommand>();
     let (res_tx, res_rx) = mpsc::channel::<FetchResultMsg>();
 
@@ -74,9 +88,72 @@ pub fn start_tle_worker() -> FetchChannels {
         rt.block_on(async move {
             let client = reqwest::Client::new();
 
+            // Initialize cache with config values (optional - graceful degradation if fails)
+            let cache = if cache_config.enabled {
+                match TleCache::new(cache_config.expiration_days) {
+                    Ok(c) => {
+                        println!(
+                            "[TLE CACHE] Initialized (expiration={} days, verbose={})",
+                            cache_config.expiration_days, cache_config.verbose_logging
+                        );
+                        Some(c)
+                    }
+                    Err(e) => {
+                        eprintln!("[TLE CACHE] Failed to initialize: {}", e);
+                        None
+                    }
+                }
+            } else {
+                println!("[TLE CACHE] Disabled by config");
+                None
+            };
+            let verbose = cache_config.verbose_logging;
+
             while let Ok(cmd) = cmd_rx.recv() {
                 match cmd {
                     FetchCommand::Fetch(norad) => {
+                        // Check cache before network fetch
+                        let mut use_cache = false;
+                        let mut stale_cache: Option<CachedTle> = None;
+                        if let Some(ref cache) = cache {
+                            match cache.read(norad) {
+                                Ok(Some(cached)) if cache.is_valid(&cached) => {
+                                    println!(
+                                        "[TLE CACHE HIT] norad={} epoch={}",
+                                        norad,
+                                        cached.epoch_utc.to_rfc3339()
+                                    );
+                                    send_cached_result(&res_tx, cached);
+                                    use_cache = true;
+                                }
+                                Ok(Some(cached)) => {
+                                    if verbose {
+                                        println!(
+                                            "[TLE CACHE EXPIRED] norad={} epoch={}",
+                                            norad,
+                                            cached.epoch_utc.to_rfc3339()
+                                        );
+                                    }
+                                    // Store stale cache for potential fallback
+                                    stale_cache = Some(cached);
+                                }
+                                Ok(None) => {
+                                    if verbose {
+                                        println!("[TLE CACHE MISS] norad={}", norad);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[TLE CACHE ERROR] read failed for norad={}: {}",
+                                        norad, e
+                                    );
+                                }
+                            }
+                        }
+
+                        if use_cache {
+                            continue; // Skip network fetch
+                        }
                         let url = format!(
                             "https://celestrak.org/NORAD/elements/gp.php?CATNR={}&FORMAT=TLE",
                             norad
@@ -133,19 +210,48 @@ pub fn start_tle_worker() -> FetchChannels {
                                 );
                                 send(FetchResultMsg::Success {
                                     norad,
-                                    name,
-                                    line1,
-                                    line2,
+                                    name: name.clone(),
+                                    line1: line1.clone(),
+                                    line2: line2.clone(),
                                     epoch_utc,
                                     group: None,
-                                })
+                                });
+
+                                // Write to cache after successful fetch
+                                if let Some(ref cache) = cache {
+                                    let cached_entry = CachedTle {
+                                        norad,
+                                        name,
+                                        line1,
+                                        line2,
+                                        epoch_utc,
+                                        cached_at: Utc::now(),
+                                    };
+                                    if let Err(e) = cache.write(&cached_entry) {
+                                        eprintln!(
+                                            "[TLE CACHE ERROR] write failed for norad={}: {}",
+                                            norad, e
+                                        );
+                                    }
+                                }
                             }
                             Err(e) => {
                                 eprintln!("[TLE RESULT] norad={} FAILURE: {}", norad, e);
-                                send(FetchResultMsg::Failure {
-                                    norad,
-                                    error: e.to_string(),
-                                })
+
+                                // Phase 2: Stale cache fallback on network failure
+                                if let Some(stale) = stale_cache {
+                                    eprintln!(
+                                        "[TLE FALLBACK] Using stale cache for norad={} (epoch={}) due to network failure",
+                                        norad,
+                                        stale.epoch_utc.to_rfc3339()
+                                    );
+                                    send_cached_result(&res_tx, stale);
+                                } else {
+                                    send(FetchResultMsg::Failure {
+                                        norad,
+                                        error: e.to_string(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -179,12 +285,30 @@ pub fn start_tle_worker() -> FetchChannels {
                                 );
                                 send(FetchResultMsg::Success {
                                     norad: entry.norad,
-                                    name: entry.name,
-                                    line1: entry.line1,
-                                    line2: entry.line2,
+                                    name: entry.name.clone(),
+                                    line1: entry.line1.clone(),
+                                    line2: entry.line2.clone(),
                                     epoch_utc,
                                     group: Some(group_name.clone()),
                                 });
+
+                                // Write each satellite from group to cache
+                                if let Some(ref cache) = cache {
+                                    let cached_entry = CachedTle {
+                                        norad: entry.norad,
+                                        name: entry.name,
+                                        line1: entry.line1,
+                                        line2: entry.line2,
+                                        epoch_utc,
+                                        cached_at: Utc::now(),
+                                    };
+                                    if let Err(e) = cache.write(&cached_entry) {
+                                        eprintln!(
+                                            "[TLE CACHE ERROR] write failed for norad={}: {}",
+                                            entry.norad, e
+                                        );
+                                    }
+                                }
                             }
                             Ok::<_, anyhow::Error>(count)
                         }

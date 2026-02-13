@@ -32,7 +32,10 @@ impl Plugin for SatellitePlugin {
             .init_resource::<ColorHueCounter>()
             .insert_resource(crate::ui::groups::initialize_group_registry())
             // OrbitTrailConfig and SatelliteRenderConfig are now in UiConfigBundle
-            .add_systems(Startup, (init_satellite_render_assets, spawn_default_satellites).chain())
+            .add_systems(
+                Startup,
+                (init_satellite_render_assets, spawn_default_satellites).chain(),
+            )
             .add_systems(
                 Update,
                 (
@@ -78,7 +81,10 @@ fn spawn_default_satellites(
     norad_index.map.insert(ISS_NORAD, entity);
 
     if let Some(fetch) = fetch_channels
-        && let Err(err) = fetch.cmd_tx.send(crate::tle::FetchCommand::Fetch(ISS_NORAD)) {
-            eprintln!("[ISS] Failed to request TLE: {}", err);
-        }
+        && let Err(err) = fetch
+            .cmd_tx
+            .send(crate::tle::FetchCommand::Fetch(ISS_NORAD))
+    {
+        eprintln!("[ISS] Failed to request TLE: {}", err);
+    }
 }

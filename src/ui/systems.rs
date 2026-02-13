@@ -3409,6 +3409,7 @@ fn update_space_weather_texts(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_launch_library_texts(
     data: Res<LaunchLibraryData>,
     state: Res<LaunchLibraryState>,
@@ -3448,6 +3449,7 @@ fn update_launch_library_texts(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_launch_library_popup(
     data: Res<LaunchLibraryData>,
     launch_ui: Res<LaunchLibraryUiState>,
@@ -3888,18 +3890,19 @@ fn spawn_event_row(
                 TextLayout::new_with_no_wrap(),
             ));
             if let Some(desc) = desc
-                && !desc.trim().is_empty() {
-                    row.spawn((
-                        bevy::ui::widget::Text::new(desc),
-                        ThemedText,
-                        TextFont {
-                            font_size: 10.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgba(0.55, 0.65, 0.78, 0.7)),
-                        TextLayout::new_with_no_wrap(),
-                    ));
-                }
+                && !desc.trim().is_empty()
+            {
+                row.spawn((
+                    bevy::ui::widget::Text::new(desc),
+                    ThemedText,
+                    TextFont {
+                        font_size: 10.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.55, 0.65, 0.78, 0.7)),
+                    TextLayout::new_with_no_wrap(),
+                ));
+            }
         })
         .insert(Outline::new(Val::Px(1.0), Val::Px(0.0), PANEL_EDGE));
 }

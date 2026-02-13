@@ -53,3 +53,24 @@ pub struct FetchChannels {
     pub cmd_tx: Sender<FetchCommand>,
     pub res_rx: Arc<Mutex<Receiver<FetchResultMsg>>>,
 }
+
+/// Configuration for TLE disk caching
+#[derive(Resource, Clone)]
+pub struct TleCacheConfig {
+    /// Whether disk caching is enabled
+    pub enabled: bool,
+    /// Number of days before a cached TLE is considered expired
+    pub expiration_days: i64,
+    /// Enable verbose logging of cache hits/misses
+    pub verbose_logging: bool,
+}
+
+impl Default for TleCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            expiration_days: 7,
+            verbose_logging: false,
+        }
+    }
+}

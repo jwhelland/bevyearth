@@ -9,9 +9,9 @@ use bevy::mesh::{
     ConeAnchor, ConeMeshBuilder, CylinderAnchor, CylinderMeshBuilder, TorusMeshBuilder,
 };
 use bevy::picking::events::{Click, Pointer};
+use bevy::prelude::AlphaMode;
 use bevy::prelude::ChildOf;
 use bevy::prelude::*;
-use bevy::prelude::AlphaMode;
 use chrono::DateTime;
 use chrono::Utc;
 use std::collections::HashMap;
@@ -368,9 +368,8 @@ fn find_launch_index_for_marker(
     let mut best: Option<(usize, DateTime<Utc>)> = None;
 
     for (idx, launch) in launches.iter().enumerate() {
-        let matches_id = marker.pad_id.is_some()
-            && launch.pad_id.is_some()
-            && marker.pad_id == launch.pad_id;
+        let matches_id =
+            marker.pad_id.is_some() && launch.pad_id.is_some() && marker.pad_id == launch.pad_id;
         let matches_coords = launch.pad_lat.is_some()
             && launch.pad_lon.is_some()
             && ((launch.pad_lat.unwrap() - marker.pad_lat).abs() < 0.01)
@@ -409,15 +408,17 @@ fn build_pad_markers(launches: &[LaunchSummary]) -> Vec<LaunchPadMarker> {
             .map(|id| format!("id:{id}"))
             .unwrap_or_else(|| format!("name:{}:{:.3}:{:.3}", pad_name, lat, lon));
 
-        let entry = map.entry(pad_key.clone()).or_insert_with(|| LaunchPadMarker {
-            pad_key: pad_key.clone(),
-            pad_id: launch.pad_id,
-            pad_name: pad_name.clone(),
-            pad_lat: lat,
-            pad_lon: lon,
-            launch_count: 0,
-            next_net: launch.net_utc,
-        });
+        let entry = map
+            .entry(pad_key.clone())
+            .or_insert_with(|| LaunchPadMarker {
+                pad_key: pad_key.clone(),
+                pad_id: launch.pad_id,
+                pad_name: pad_name.clone(),
+                pad_lat: lat,
+                pad_lon: lon,
+                launch_count: 0,
+                next_net: launch.net_utc,
+            });
         entry.launch_count += 1;
         if let Some(net) = launch.net_utc {
             let next = entry.next_net;
