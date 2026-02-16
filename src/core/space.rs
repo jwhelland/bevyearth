@@ -20,5 +20,9 @@ pub fn ecef_to_bevy_km(ecef_km: DVec3) -> Vec3 {
 /// Convert Bevy render km (f32) to standard ECEF km (f64).
 /// Inverse mapping: ECEF (x,y,z) = (Bevy.z, Bevy.x, Bevy.y)
 pub fn bevy_to_ecef_km(bevy_km: Vec3) -> DVec3 {
-    DVec3::new(bevy_km.z as f64, bevy_km.x as f64, bevy_km.y as f64)
+    DVec3::new(
+        f64::from(bevy_km.z),
+        f64::from(bevy_km.x),
+        f64::from(bevy_km.y),
+    )
 }

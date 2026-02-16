@@ -167,7 +167,7 @@ fn update_launch_pad_markers(
 
     let pad_markers = build_pad_markers(&data.launches);
     let mut existing: HashMap<String, Entity> = HashMap::new();
-    for (entity, marker, _transform, _visibility) in query.iter_mut() {
+    for (entity, marker, _transform, _visibility) in &mut query {
         existing.insert(marker.pad_key.clone(), entity);
     }
 
@@ -265,7 +265,7 @@ fn update_launch_pad_markers(
     }
 
     if !show_markers {
-        for (entity, _marker, _transform, _visibility) in query.iter_mut() {
+        for (entity, _marker, _transform, _visibility) in &mut query {
             commands.entity(entity).insert(Visibility::Hidden);
         }
     }
@@ -285,7 +285,7 @@ fn sync_launch_pad_visibility(
         Visibility::Hidden
     };
 
-    for mut vis in query.iter_mut() {
+    for mut vis in &mut query {
         *vis = visibility;
     }
 }
@@ -313,7 +313,7 @@ fn marker_transform(bevy_pos: Vec3, count: usize) -> Transform {
 fn hash_phase(key: &str) -> f32 {
     let mut hash: u32 = 2166136261;
     for b in key.as_bytes() {
-        hash ^= *b as u32;
+        hash ^= u32::from(*b);
         hash = hash.wrapping_mul(16777619);
     }
     (hash as f32 / u32::MAX as f32) * std::f32::consts::TAU
@@ -321,7 +321,7 @@ fn hash_phase(key: &str) -> f32 {
 
 fn animate_pulse_rings(time: Res<Time>, mut rings: Query<(&PulseRing, &mut Transform)>) {
     let t = time.elapsed_secs();
-    for (ring, mut transform) in rings.iter_mut() {
+    for (ring, mut transform) in &mut rings {
         let pulse = 1.0 + ring.amplitude * (t * ring.speed + ring.phase).sin();
         transform.scale = Vec3::splat(ring.base_scale * pulse);
     }
@@ -403,10 +403,10 @@ fn build_pad_markers(launches: &[LaunchSummary]) -> Vec<LaunchPadMarker> {
             .pad_name
             .clone()
             .unwrap_or_else(|| "Launch Pad".to_string());
-        let pad_key = launch
-            .pad_id
-            .map(|id| format!("id:{id}"))
-            .unwrap_or_else(|| format!("name:{}:{:.3}:{:.3}", pad_name, lat, lon));
+        let pad_key = launch.pad_id.map_or_else(
+            || format!("name:{pad_name}:{lat:.3}:{lon:.3}"),
+            |id| format!("id:{id}"),
+        );
 
         let entry = map
             .entry(pad_key.clone())

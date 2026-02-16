@@ -22,7 +22,7 @@ pub fn update_sun_light_direction(
         return;
     }
 
-    for mut transform in lights.iter_mut() {
+    for mut transform in &mut lights {
         // Position the light far from origin in the sun direction
         // Position the light far from origin in the sun direction
         // Distance doesn't affect DirectionalLight intensity, but makes the setup clearer

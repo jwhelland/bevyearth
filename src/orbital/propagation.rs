@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 /// Calculate minutes since epoch for SGP4 propagation
 pub fn minutes_since_epoch(sim_utc: DateTime<Utc>, epoch: DateTime<Utc>) -> f64 {
     let delta = sim_utc - epoch;
-    delta.num_seconds() as f64 / 60.0 + (delta.subsec_nanos() as f64) / 60.0 / 1.0e9
+    delta.num_seconds() as f64 / 60.0 + f64::from(delta.subsec_nanos()) / 60.0 / 1.0e9
 }
 
 #[cfg(test)]

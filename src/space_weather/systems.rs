@@ -231,12 +231,12 @@ pub fn update_aurora_texture(
         return;
     }
 
-    if render_state.intensity_buffer.len() != width * height {
-        render_state.intensity_buffer = vec![0.0; width * height];
-    } else {
-        for v in render_state.intensity_buffer.iter_mut() {
+    if render_state.intensity_buffer.len() == width * height {
+        for v in &mut render_state.intensity_buffer {
             *v = 0.0;
         }
+    } else {
+        render_state.intensity_buffer = vec![0.0; width * height];
     }
 
     let max_value = aurora.max_value.max(1.0);
@@ -308,7 +308,7 @@ pub fn update_aurora_texture(
             }
         }
     } else {
-        for point in aurora.points.iter() {
+        for point in &aurora.points {
             let mut lon = point.lon;
             // Apply longitude offset for magnetic->geographic coordinate conversion
             lon += config.aurora_longitude_offset;
@@ -363,7 +363,7 @@ pub fn update_aurora_texture(
         let grid_nonzero = aurora.grid_values.iter().filter(|v| **v > 0.0).count();
         let mut buffer_nonzero = 0usize;
         let mut buffer_max = 0.0_f32;
-        for value in render_state.intensity_buffer.iter() {
+        for value in &render_state.intensity_buffer {
             if *value > 0.0 {
                 buffer_nonzero += 1;
             }

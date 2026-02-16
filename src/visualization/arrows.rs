@@ -19,10 +19,10 @@ pub fn draw_arrow_segment(
     config: &ArrowConfig,
 ) {
     // constants conversion meters->kilometers
-    let lift_km = config.lift_m as f64 / 1000.0;
+    let lift_km = f64::from(config.lift_m) / 1000.0;
     // Direction and lifted city endpoint
     let dir = (sat_ecef_km - city_ecef_km).normalize();
-    let city_lifted = city_ecef_km.normalize() * (EARTH_RADIUS_KM as f64 + lift_km);
+    let city_lifted = city_ecef_km.normalize() * (f64::from(EARTH_RADIUS_KM) + lift_km);
     let total_len = (sat_ecef_km - city_lifted).length() as f32;
 
     // color gradient
@@ -52,7 +52,7 @@ pub fn draw_arrow_segment(
         .clamp(shaft_min_km, shaft_max_km)
         .min(total_len * 0.9);
 
-    let shaft_end = city_lifted + dir * shaft_len as f64;
+    let shaft_end = city_lifted + dir * f64::from(shaft_len);
     let city_lifted_bevy = ecef_to_bevy_km(city_lifted);
     let shaft_end_bevy = ecef_to_bevy_km(shaft_end);
     gizmos.arrow(city_lifted_bevy, shaft_end_bevy, draw_color);
@@ -71,7 +71,7 @@ pub fn draw_city_to_satellite_arrows(
     let Some(cities) = cities else { return };
     let mut sats: Vec<(DVec3, Color)> = Vec::new();
     for (world_ecef, color_comp) in sat_query.iter() {
-        let color = color_comp.map(|c| c.0).unwrap_or(config.color);
+        let color = color_comp.map_or(config.color, |c| c.0);
         sats.push((world_ecef.0, color));
     }
     if sats.is_empty() {
@@ -79,7 +79,7 @@ pub fn draw_city_to_satellite_arrows(
     }
 
     let mut drawn = 0usize;
-    let earth_radius_km = EARTH_RADIUS_KM as f64;
+    let earth_radius_km = f64::from(EARTH_RADIUS_KM);
     'outer: for &city_ecef in cities.iter() {
         for &(sat_ecef, sat_color) in &sats {
             if !hemisphere_prefilter_ecef_dvec(city_ecef, sat_ecef, earth_radius_km) {

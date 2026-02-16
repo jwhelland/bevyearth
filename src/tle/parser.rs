@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-/// Parse TLE epoch from line 1 to UTC DateTime
+/// Parse TLE epoch from line 1 to UTC `DateTime`
 pub fn parse_tle_epoch_to_utc(line1: &str) -> Option<DateTime<Utc>> {
     // TLE line1 epoch fields (columns 19–32, 1-based; 18..32 0-based)
     if line1.len() < 32 {
@@ -20,8 +20,8 @@ pub fn parse_tle_epoch_to_utc(line1: &str) -> Option<DateTime<Utc>> {
     let ddd: i32 = ddd_str.parse().ok()?;
     let year = if yy >= 57 { 1900 + yy } else { 2000 + yy };
     let jan1 = chrono::NaiveDate::from_ymd_opt(year, 1, 1)?;
-    let date = jan1.checked_add_signed(chrono::Duration::days((ddd - 1) as i64))?;
-    let frac_sec: f64 = match format!("0.{}", frac).parse::<f64>() {
+    let date = jan1.checked_add_signed(chrono::Duration::days(i64::from(ddd - 1)))?;
+    let frac_sec: f64 = match format!("0.{frac}").parse::<f64>() {
         Ok(v) => v * 86400.0,
         Err(_) => return None,
     };

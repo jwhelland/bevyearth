@@ -39,7 +39,7 @@ pub fn process_fetch_results_system(
                 epoch_utc,
                 group,
             } => {
-                let name_val = name.or_else(|| Some(format!("NORAD {}", norad)));
+                let name_val = name.or_else(|| Some(format!("NORAD {norad}")));
                 let epoch = parse_tle_epoch_to_utc(&line1).unwrap_or(epoch_utc);
                 let tle_data = TleData { epoch_utc: epoch };
 
@@ -117,10 +117,7 @@ pub fn process_fetch_results_system(
                 }
             }
             FetchResultMsg::Failure { norad, error } => {
-                eprintln!(
-                    "[TLE DISPATCH] received FAILURE for norad={}: {}",
-                    norad, error
-                );
+                eprintln!("[TLE DISPATCH] received FAILURE for norad={norad}: {error}");
                 if let Some(&entity) = norad_index.map.get(&norad) {
                     commands
                         .entity(entity)
@@ -128,23 +125,17 @@ pub fn process_fetch_results_system(
                         .remove::<Propagator>()
                         .insert(PropagationError);
                 } else {
-                    eprintln!(
-                        "[TLE DISPATCH] failure for unknown norad={} (not in index)",
-                        norad
-                    );
+                    eprintln!("[TLE DISPATCH] failure for unknown norad={norad} (not in index)");
                 }
             }
             FetchResultMsg::GroupDone { group, count } => {
-                println!(
-                    "[TLE DISPATCH] group={} done, {} satellites loaded",
-                    group, count
-                );
+                println!("[TLE DISPATCH] group={group} done, {count} satellites loaded");
                 right_ui.group_loading = false;
             }
             FetchResultMsg::GroupFailure { group, error } => {
-                eprintln!("[TLE DISPATCH] group={} failed: {}", group, error);
+                eprintln!("[TLE DISPATCH] group={group} failed: {error}");
                 right_ui.group_loading = false;
-                right_ui.error = Some(format!("Group fetch failed: {}", error));
+                right_ui.error = Some(format!("Group fetch failed: {error}"));
             }
         }
     }

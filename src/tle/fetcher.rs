@@ -99,7 +99,7 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                         Some(c)
                     }
                     Err(e) => {
-                        eprintln!("[TLE CACHE] Failed to initialize: {}", e);
+                        eprintln!("[TLE CACHE] Failed to initialize: {e}");
                         None
                     }
                 }
@@ -139,13 +139,12 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                                 }
                                 Ok(None) => {
                                     if verbose {
-                                        println!("[TLE CACHE MISS] norad={}", norad);
+                                        println!("[TLE CACHE MISS] norad={norad}");
                                     }
                                 }
                                 Err(e) => {
                                     eprintln!(
-                                        "[TLE CACHE ERROR] read failed for norad={}: {}",
-                                        norad, e
+                                        "[TLE CACHE ERROR] read failed for norad={norad}: {e}"
                                     );
                                 }
                             }
@@ -155,8 +154,7 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                             continue; // Skip network fetch
                         }
                         let url = format!(
-                            "https://celestrak.org/NORAD/elements/gp.php?CATNR={}&FORMAT=TLE",
-                            norad
+                            "https://celestrak.org/NORAD/elements/gp.php?CATNR={norad}&FORMAT=TLE"
                         );
                         let send = |m| {
                             let _ = res_tx.send(m);
@@ -173,7 +171,7 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                             // Attempt parse even if not 2xx, to capture HTML/text bodies for debugging
                             let lines = clean_tle_lines(&body);
                             let pairs = parse_tle_pairs(&lines);
-                            let sat_fmt = format!("{:05}", norad);
+                            let sat_fmt = format!("{norad:05}");
                             let entry = pairs
                                 .into_iter()
                                 .find(|e| {
@@ -229,14 +227,13 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                                     };
                                     if let Err(e) = cache.write(&cached_entry) {
                                         eprintln!(
-                                            "[TLE CACHE ERROR] write failed for norad={}: {}",
-                                            norad, e
+                                            "[TLE CACHE ERROR] write failed for norad={norad}: {e}"
                                         );
                                     }
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[TLE RESULT] norad={} FAILURE: {}", norad, e);
+                                eprintln!("[TLE RESULT] norad={norad} FAILURE: {e}");
 
                                 // Phase 2: Stale cache fallback on network failure
                                 if let Some(stale) = stale_cache {
@@ -316,8 +313,7 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                         match res {
                             Ok(count) => {
                                 println!(
-                                    "[TLE GROUP RESULT] group={} SUCCESS count={}",
-                                    group_name, count
+                                    "[TLE GROUP RESULT] group={group_name} SUCCESS count={count}"
                                 );
                                 send(FetchResultMsg::GroupDone {
                                     group: group_name,
@@ -325,7 +321,7 @@ pub fn start_tle_worker(cache_config: crate::tle::types::TleCacheConfig) -> Fetc
                                 });
                             }
                             Err(e) => {
-                                eprintln!("[TLE GROUP RESULT] group={} FAILURE: {}", group_name, e);
+                                eprintln!("[TLE GROUP RESULT] group={group_name} FAILURE: {e}");
                                 send(FetchResultMsg::GroupFailure {
                                     group: group_name,
                                     error: e.to_string(),

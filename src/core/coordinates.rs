@@ -1,12 +1,12 @@
 //! Core coordinate utilities
 //!
 //! Unifies all coordinate-related types and functions into a single module:
-//! - Geographic coordinates and helpers (was in crate::coord)
-//! - Orbital/Earth-frame transformations and time utilities (was in crate::orbital::coordinates)
+//! - Geographic coordinates and helpers (was in `crate::coord`)
+//! - Orbital/Earth-frame transformations and time utilities (was in `crate::orbital::coordinates`)
 //!
 //! Recommended usage:
-//! - Import from crate::core::coordinates::*
-//! - Legacy paths via crate::coord and crate::orbital::coordinates are temporarily re-exported as shims.
+//! - Import from `crate::core::coordinates::`*
+//! - Legacy paths via `crate::coord` and `crate::orbital::coordinates` are temporarily re-exported as shims.
 
 use bevy::math::{DVec3, Vec3};
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -78,16 +78,16 @@ impl Coordinates {
     pub fn from_degrees(latitude: f32, longitude: f32) -> Result<Self, CoordError> {
         if !(-90.0..=90.0).contains(&latitude) {
             return Err(CoordError {
-                msg: format!("Invalid latitude: {:?}", latitude),
+                msg: format!("Invalid latitude: {latitude:?}"),
             });
         }
         if !(-180.0..=180.0).contains(&longitude) {
             return Err(CoordError {
-                msg: format!("Invalid longitude: {:?}", longitude),
+                msg: format!("Invalid longitude: {longitude:?}"),
             });
         }
-        let latitude = (latitude as f64) / (180.0_f64 / PI);
-        let longitude = (longitude as f64) / (180.0_f64 / PI);
+        let latitude = f64::from(latitude) / (180.0_f64 / PI);
+        let longitude = f64::from(longitude) / (180.0_f64 / PI);
         Ok(Coordinates {
             latitude,
             longitude,
@@ -141,10 +141,10 @@ fn map_latitude(lat: f32) -> Result<f32, CoordError> {
     // Ensure latitude is valid
     if !(-90.0..=90.0).contains(&lat) {
         return Err(CoordError {
-            msg: format!("Invalid latitude: {:?}", lat),
+            msg: format!("Invalid latitude: {lat:?}"),
         });
     }
-    let lat64 = lat as f64;
+    let lat64 = f64::from(lat);
     let v = if (0.0..=90.0).contains(&lat) {
         map64((90.0, 0.0), (0.0, 0.5), lat64)
     } else {
@@ -159,10 +159,10 @@ fn map_longitude(lon: f32) -> Result<f32, CoordError> {
     // Ensure longitude is valid
     if !(-180.0..=180.0).contains(&lon) {
         return Err(CoordError {
-            msg: format!("Invalid longitude: {:?}", lon),
+            msg: format!("Invalid longitude: {lon:?}"),
         });
     }
-    let lon64 = lon as f64;
+    let lon64 = f64::from(lon);
     let u = if (-180.0..=0.0).contains(&lon) {
         map64((-180.0, 0.0), (0.0, 0.5), lon64)
     } else {
@@ -228,9 +228,9 @@ pub fn julian_date_utc(t: DateTime<Utc>) -> f64 {
     let d = t.day() as i32;
 
     // Convert time of day to fraction of day
-    let hour = t.hour() as f64;
-    let minute = t.minute() as f64;
-    let sec = t.second() as f64 + (t.nanosecond() as f64) * 1e-9_f64;
+    let hour = f64::from(t.hour());
+    let minute = f64::from(t.minute());
+    let sec = f64::from(t.second()) + f64::from(t.nanosecond()) * 1e-9_f64;
     let day_fraction = (hour + (minute + sec / 60.0) / 60.0) / 24.0;
 
     if m <= 2 {
@@ -238,12 +238,12 @@ pub fn julian_date_utc(t: DateTime<Utc>) -> f64 {
         m += 12;
     }
 
-    let a = (y as f64 / 100.0).floor();
+    let a = (f64::from(y) / 100.0).floor();
     let b = 2.0 - a + (a / 4.0).floor();
 
-    let jd0 = (365.25 * (y as f64 + 4716.0)).floor()
-        + (30.6001 * ((m + 1) as f64)).floor()
-        + d as f64
+    let jd0 = (365.25 * (f64::from(y) + 4716.0)).floor()
+        + (30.6001 * f64::from(m + 1)).floor()
+        + f64::from(d)
         + b
         - 1524.5;
 

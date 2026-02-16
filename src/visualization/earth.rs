@@ -69,7 +69,7 @@ pub fn generate_unified_earth(
 /// Generate icosphere mesh at a specific radius (km).
 pub fn generate_icosphere_with_radius(subdivisions: u32, radius_km: f32) -> Mesh {
     // Start with icosahedron vertices (12 vertices)
-    let phi = (1.0 + 5.0_f32.sqrt()) / 2.0; // Golden ratio
+    let phi = f32::midpoint(1.0, 5.0_f32.sqrt()); // Golden ratio
     let vertices = vec![
         Vec3::new(-1.0, phi, 0.0).normalize(),
         Vec3::new(1.0, phi, 0.0).normalize(),

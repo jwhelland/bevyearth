@@ -26,13 +26,11 @@ pub fn poll_launch_library(
     let should_fetch_launches = should_force
         || state
             .last_launch_request
-            .map(|t| now.signed_duration_since(t) >= config.refresh_interval)
-            .unwrap_or(true);
+            .is_none_or(|t| now.signed_duration_since(t) >= config.refresh_interval);
     let should_fetch_events = should_force
         || state
             .last_event_request
-            .map(|t| now.signed_duration_since(t) >= config.refresh_interval)
-            .unwrap_or(true);
+            .is_none_or(|t| now.signed_duration_since(t) >= config.refresh_interval);
 
     if should_fetch_launches {
         let url = build_launches_url(&config, now);
@@ -40,7 +38,7 @@ pub fn poll_launch_library(
             .cmd_tx
             .send(LaunchLibraryCommand::FetchLaunches { url })
         {
-            state.launch_error = Some(format!("Failed to queue launches fetch: {}", err));
+            state.launch_error = Some(format!("Failed to queue launches fetch: {err}"));
             state.is_loading_launches = false;
         } else {
             state.last_launch_request = Some(now);
@@ -55,7 +53,7 @@ pub fn poll_launch_library(
             .cmd_tx
             .send(LaunchLibraryCommand::FetchEvents { url })
         {
-            state.event_error = Some(format!("Failed to queue events fetch: {}", err));
+            state.event_error = Some(format!("Failed to queue events fetch: {err}"));
             state.is_loading_events = false;
         } else {
             state.last_event_request = Some(now);

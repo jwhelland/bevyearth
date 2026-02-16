@@ -7,7 +7,7 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct ShowAxes;
 
-/// System to draw axes for entities with the ShowAxes component
+/// System to draw axes for entities with the `ShowAxes` component
 pub fn draw_axes(
     mut gizmos: Gizmos,
     query: Query<&Transform, With<ShowAxes>>,

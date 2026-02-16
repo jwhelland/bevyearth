@@ -16,7 +16,7 @@ impl Plugin for CitiesPlugin {
     }
 }
 
-/// Initialize the CitiesEcef resource with actual city data
+/// Initialize the `CitiesEcef` resource with actual city data
 fn initialize_cities_ecef(mut commands: Commands) {
     let major_cities = major_cities_data();
     let mut cache = Vec::with_capacity(major_cities.len());

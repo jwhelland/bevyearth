@@ -85,6 +85,6 @@ fn spawn_default_satellites(
             .cmd_tx
             .send(crate::tle::FetchCommand::Fetch(ISS_NORAD))
     {
-        eprintln!("[ISS] Failed to request TLE: {}", err);
+        eprintln!("[ISS] Failed to request TLE: {err}");
     }
 }

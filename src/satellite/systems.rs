@@ -76,7 +76,7 @@ pub fn propagate_satellites_system(
     mut commands: Commands,
 ) {
     let gmst = gmst_rad_with_dut1(sim_time.current_utc, **dut1);
-    for (entity, tle_comp, propagator, mut transform, _color, world_opt) in q.iter_mut() {
+    for (entity, tle_comp, propagator, mut transform, _color, world_opt) in &mut q {
         let mins = minutes_since_epoch(sim_time.current_utc, tle_comp.0.epoch_utc);
         // sgp4 2.3.0 expects MinutesSinceEpoch newtype and returns arrays
         if let Ok(state) = propagator.0.propagate(sgp4::MinutesSinceEpoch(mins)) {
@@ -154,7 +154,7 @@ pub fn update_orbit_trails_system(
 ) {
     let current_time = sim_time.current_utc;
 
-    for (mut trail, world_ecef, flags) in trail_query.iter_mut() {
+    for (mut trail, world_ecef, flags) in &mut trail_query {
         // Only update trail if it's enabled for this satellite
         if !flags.show_trail {
             // Clear trail if disabled
@@ -164,17 +164,13 @@ pub fn update_orbit_trails_system(
 
         // Check if enough time has passed to add a new trail point
         let should_add_point = trail.history.is_empty()
-            || trail
-                .history
-                .last()
-                .map(|last| {
-                    current_time
-                        .signed_duration_since(last.timestamp)
-                        .num_milliseconds() as f32
-                        / 1000.0
-                        >= config_bundle.trail_cfg.update_interval_seconds
-                })
-                .unwrap_or(true);
+            || trail.history.last().is_none_or(|last| {
+                current_time
+                    .signed_duration_since(last.timestamp)
+                    .num_milliseconds() as f32
+                    / 1000.0
+                    >= config_bundle.trail_cfg.update_interval_seconds
+            });
 
         if should_add_point {
             // Add new trail point
@@ -284,7 +280,7 @@ pub fn move_camera_to_satellite(
                 println!("[CAMERA] Failed to get satellite transform");
             }
         } else {
-            println!("[CAMERA] No satellite found for norad={}", norad);
+            println!("[CAMERA] No satellite found for norad={norad}");
         }
         // Clear selection after processing
         selected.selected = None;
@@ -383,7 +379,7 @@ pub fn satellite_click_system(
         // Check if the clicked entity is a satellite
         if let Ok((norad, name_opt)) = norad_query.get(clicked_entity) {
             // First, clear the clicked status from all satellites
-            for mut flags in all_satellites.iter_mut() {
+            for mut flags in &mut all_satellites {
                 flags.is_clicked = false;
             }
 
@@ -393,7 +389,7 @@ pub fn satellite_click_system(
 
                 info!(
                     "Clicked satellite: {} (NORAD: {})",
-                    name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed"),
+                    name_opt.map_or("Unnamed", |n| n.0.as_str()),
                     norad.0
                 );
             }
@@ -421,7 +417,7 @@ pub fn update_satellite_rendering_system(
         }
     }
 
-    for (mut transform, satellite_color, entity) in satellite_query.iter_mut() {
+    for (mut transform, satellite_color, entity) in &mut satellite_query {
         // Update scale based on sphere_radius
         transform.scale = Vec3::splat(config_bundle.render_cfg.sphere_radius);
 
@@ -438,7 +434,7 @@ pub fn update_satellite_rendering_system(
 
 /// System to propagate group color changes to all satellites in affected groups
 ///
-/// This system runs when the GroupRegistry is changed (e.g., via UI color picker)
+/// This system runs when the `GroupRegistry` is changed (e.g., via UI color picker)
 /// and updates the color of all satellites belonging to the modified group.
 pub fn update_group_colors_system(
     group_registry: Option<Res<GroupRegistry>>,
@@ -457,7 +453,7 @@ pub fn update_group_colors_system(
     }
 
     // Update cached group materials first (if any exist).
-    for (group_url, group) in registry.groups.iter() {
+    for (group_url, group) in &registry.groups {
         if let Some(handle) = group_materials.materials.get(group_url)
             && let Some(material) = materials.get_mut(handle)
         {
@@ -468,7 +464,7 @@ pub fn update_group_colors_system(
     }
 
     // Update colors for satellites that belong to groups
-    for (mut satellite_color, group_url, entity) in satellite_query.iter_mut() {
+    for (mut satellite_color, group_url, entity) in &mut satellite_query {
         if let Some(group) = registry.groups.get(&group_url.0) {
             satellite_color.0 = group.color;
 

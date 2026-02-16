@@ -96,7 +96,7 @@ impl TleCache {
 
     /// Get the file path for a cached TLE entry
     fn cache_path(&self, norad: u32) -> PathBuf {
-        self.cache_dir.join(format!("{}.json", norad))
+        self.cache_dir.join(format!("{norad}.json"))
     }
 }
 

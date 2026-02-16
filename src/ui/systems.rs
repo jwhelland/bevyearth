@@ -611,7 +611,7 @@ impl Plugin for UiSystemsPlugin {
 
 fn enforce_ui_camera_settings(mut cameras: UiCameraQuery<'_, '_>) {
     // Ensure UI cameras never clear after 3D, and prevent non-main cameras from wiping the frame.
-    for (mut camera, is_2d, is_3d, is_main) in cameras.iter_mut() {
+    for (mut camera, is_2d, is_3d, is_main) in &mut cameras {
         if is_main.is_some() {
             camera.order = 0;
             camera.is_active = true;
@@ -3206,7 +3206,7 @@ fn update_camera_input_from_ui_hover(
         hovered |= pos.cursor_over;
     }
 
-    for mut pan_orbit in cameras.iter_mut() {
+    for mut pan_orbit in &mut cameras {
         pan_orbit.enabled = !hovered;
     }
 }
@@ -3219,10 +3219,10 @@ fn update_time_display(
     )>,
     sim_time: Res<crate::orbital::SimulationTime>,
 ) {
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         text.0 = format!("UTC: {}", sim_time.current_utc.format("%Y-%m-%d %H:%M:%S"));
     }
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         text.0 = format!("{:.0}x", sim_time.time_scale.max(1.0));
     }
 }
@@ -3269,38 +3269,38 @@ fn update_status_texts(
     selected: Res<SelectedSatellite>,
     fetch: Option<Res<FetchChannels>>,
 ) {
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         text.0 = format!("Satellites: {}", satellites.iter().count());
     }
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         text.0 = if fetch.is_some() {
             "TLE Fetcher: Active".to_string()
         } else {
             "TLE Fetcher: Inactive".to_string()
         };
     }
-    for mut text in texts.p2().iter_mut() {
+    for mut text in &mut texts.p2() {
         // Find clicked satellite by checking flags
         let clicked = all_satellites.iter().find(|(_, _, flags)| flags.is_clicked);
         if let Some((norad, name_opt, _)) = clicked {
-            let name = name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed");
+            let name = name_opt.map_or("Unnamed", |n| n.0.as_str());
             text.0 = format!("Selected: {} ({})", name, norad.0);
         } else {
             text.0 = "Selected: None".to_string();
         }
     }
 
-    for mut text in texts.p3().iter_mut() {
+    for mut text in &mut texts.p3() {
         if let Some(norad) = selected.tracking {
             if let Some(&entity) = norad_index.map.get(&norad) {
                 if let Ok((_, name_opt, _)) = all_satellites.get(entity) {
-                    let name = name_opt.map(|n| n.0.as_str()).unwrap_or("Unnamed");
-                    text.0 = format!("Tracking: {} ({})", name, norad);
+                    let name = name_opt.map_or("Unnamed", |n| n.0.as_str());
+                    text.0 = format!("Tracking: {name} ({norad})");
                 } else {
-                    text.0 = format!("Tracking: {}", norad);
+                    text.0 = format!("Tracking: {norad}");
                 }
             } else {
-                text.0 = format!("Tracking: {}", norad);
+                text.0 = format!("Tracking: {norad}");
             }
         } else {
             text.0 = "Tracking: None".to_string();
@@ -3333,58 +3333,52 @@ fn update_space_weather_texts(
         return;
     }
 
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         text.0 = match (kp.value, kp.timestamp) {
             (Some(value), timestamp) => {
                 let time = format_time(timestamp);
-                format!("Kp: {:.1} ({})", value, time)
+                format!("Kp: {value:.1} ({time})")
             }
             _ => "Kp: --".to_string(),
         };
     }
 
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         let bz = solar_wind
             .bz
-            .map(|v| format!("{:+.1}", v))
-            .unwrap_or_else(|| "--".to_string());
+            .map_or_else(|| "--".to_string(), |v| format!("{v:+.1}"));
         let bt = solar_wind
             .bt
-            .map(|v| format!("{:.1}", v))
-            .unwrap_or_else(|| "--".to_string());
-        text.0 = format!("Bz: {} nT  Bt: {} nT", bz, bt);
+            .map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+        text.0 = format!("Bz: {bz} nT  Bt: {bt} nT");
     }
 
-    for mut text in texts.p2().iter_mut() {
+    for mut text in &mut texts.p2() {
         let speed = solar_wind
             .speed
-            .map(|v| format!("{:.0}", v))
-            .unwrap_or_else(|| "--".to_string());
+            .map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
         let density = solar_wind
             .density
-            .map(|v| format!("{:.1}", v))
-            .unwrap_or_else(|| "--".to_string());
-        text.0 = format!("Vsw: {} km/s  n: {} cm^-3", speed, density);
+            .map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+        text.0 = format!("Vsw: {speed} km/s  n: {density} cm^-3");
     }
 
-    for mut text in texts.p3().iter_mut() {
+    for mut text in &mut texts.p3() {
         let updated = latest_time([kp.timestamp, solar_wind.timestamp, aurora.updated_utc]);
         text.0 = format!("Updated: {}", format_time(updated));
     }
 
-    for mut text in texts.p4().iter_mut() {
+    for mut text in &mut texts.p4() {
         let err = state
             .ovation_error
             .as_deref()
             .or(state.kp_error.as_deref())
             .or(state.mag_error.as_deref())
             .or(state.plasma_error.as_deref());
-        text.0 = err
-            .map(|e| format!("Data error: {}", e))
-            .unwrap_or_default();
+        text.0 = err.map(|e| format!("Data error: {e}")).unwrap_or_default();
     }
 
-    for (mut text, mut color) in texts.p5().iter_mut() {
+    for (mut text, mut color) in &mut texts.p5() {
         if let Some(forecast_time) = aurora.updated_utc {
             let age = sim_time.current_utc.signed_duration_since(forecast_time);
             let age_mins = age.num_minutes();
@@ -3400,7 +3394,7 @@ fn update_space_weather_texts(
                 text.0 = "⚠ Forecast expiring soon".to_string();
                 color.0 = Color::srgba(1.0, 0.9, 0.3, 0.9);
             } else {
-                text.0 = format!("Forecast age: {} min", age_mins);
+                text.0 = format!("Forecast age: {age_mins} min");
                 color.0 = Color::srgba(0.6, 0.9, 0.6, 0.85);
             }
         } else {
@@ -3429,7 +3423,7 @@ fn update_launch_library_texts(
         data.events.len()
     );
 
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         if state.is_loading_launches || state.is_loading_events {
             text.0 = "Loading...".to_string();
         } else {
@@ -3438,14 +3432,12 @@ fn update_launch_library_texts(
         }
     }
 
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         let err = state
             .launch_error
             .as_deref()
             .or(state.event_error.as_deref());
-        text.0 = err
-            .map(|e| format!("Data error: {}", e))
-            .unwrap_or_default();
+        text.0 = err.map(|e| format!("Data error: {e}")).unwrap_or_default();
     }
 }
 
@@ -3482,19 +3474,19 @@ fn update_launch_library_popup(
             let mut lines = Vec::new();
             lines.push(format!("NET: {}", format_time(launch.net_utc)));
             if let Some(provider) = launch.provider_name.as_deref() {
-                lines.push(format!("Provider: {}", provider));
+                lines.push(format!("Provider: {provider}"));
             }
             if let Some(mission) = launch.mission_name.as_deref() {
-                lines.push(format!("Mission: {}", mission));
+                lines.push(format!("Mission: {mission}"));
             }
             if let Some(orbit) = launch.orbit_name.as_deref() {
-                lines.push(format!("Orbit: {}", orbit));
+                lines.push(format!("Orbit: {orbit}"));
             }
             if let Some(pad) = launch.pad_name.as_deref() {
-                lines.push(format!("Pad: {}", pad));
+                lines.push(format!("Pad: {pad}"));
             }
             if let Some(location) = launch.pad_location_name.as_deref() {
-                lines.push(format!("Location: {}", location));
+                lines.push(format!("Location: {location}"));
             }
 
             (launch.name.clone(), lines.join("\n"))
@@ -3508,10 +3500,10 @@ fn update_launch_library_popup(
             let mut lines = Vec::new();
             lines.push(format!("Date: {}", format_time(event.date_utc)));
             if let Some(type_name) = event.type_name.as_deref() {
-                lines.push(format!("Type: {}", type_name));
+                lines.push(format!("Type: {type_name}"));
             }
             if let Some(location) = event.location.as_deref() {
-                lines.push(format!("Location: {}", location));
+                lines.push(format!("Location: {location}"));
             }
             if let Some(description) = event.description.as_deref() {
                 lines.push(String::new());
@@ -3524,11 +3516,11 @@ fn update_launch_library_popup(
 
     overlay.display = Display::Flex;
 
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         text.0 = title.clone();
     }
 
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         text.0 = body.clone();
     }
 }
@@ -3652,9 +3644,10 @@ fn animate_launch_camera_focus(
 }
 
 fn format_time(timestamp: Option<DateTime<Utc>>) -> String {
-    timestamp
-        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
-        .unwrap_or_else(|| "--".to_string())
+    timestamp.map_or_else(
+        || "--".to_string(),
+        |t| t.format("%Y-%m-%d %H:%M UTC").to_string(),
+    )
 }
 
 fn latest_time(times: [Option<DateTime<Utc>>; 3]) -> Option<DateTime<Utc>> {
@@ -3963,17 +3956,17 @@ fn update_text_input_display(
         Query<&mut bevy::ui::widget::Text, With<ErrorText>>,
     )>,
 ) {
-    for mut text in texts.p0().iter_mut() {
+    for mut text in &mut texts.p0() {
         text.0 = right_ui.input.clone();
     }
-    for mut text in texts.p1().iter_mut() {
+    for mut text in &mut texts.p1() {
         if right_ui.input.is_empty() {
             text.0 = "NORAD ID".to_string();
         } else {
             text.0.clear();
         }
     }
-    for mut text in texts.p2().iter_mut() {
+    for mut text in &mut texts.p2() {
         if let Some(err) = &right_ui.error {
             text.0 = err.clone();
         } else {
@@ -3986,7 +3979,7 @@ fn sync_panel_toggle_buttons(
     ui_state: Res<UIState>,
     mut buttons: Query<(&PanelToggle, &mut ButtonVariant)>,
 ) {
-    for (toggle, mut variant) in buttons.iter_mut() {
+    for (toggle, mut variant) in &mut buttons {
         let is_on = match toggle.kind {
             PanelToggleKind::Left => ui_state.show_left_panel,
             PanelToggleKind::Right => ui_state.show_right_panel,
@@ -4015,12 +4008,11 @@ fn process_pending_add(
     right_ui.pending_add = false;
 
     let input = right_ui.input.trim();
-    let norad = match input.parse::<u32>() {
-        Ok(value) => value,
-        Err(_) => {
-            right_ui.error = Some("Invalid NORAD ID".to_string());
-            return;
-        }
+    let norad = if let Ok(value) = input.parse::<u32>() {
+        value
+    } else {
+        right_ui.error = Some("Invalid NORAD ID".to_string());
+        return;
     };
 
     if norad_index.map.contains_key(&norad) {
@@ -4048,7 +4040,7 @@ fn process_pending_add(
     right_ui.error = None;
     if let Some(fetch) = fetch_channels {
         if let Err(e) = fetch.cmd_tx.send(FetchCommand::Fetch(norad)) {
-            right_ui.error = Some(format!("Failed to fetch NORAD {}: {}", norad, e));
+            right_ui.error = Some(format!("Failed to fetch NORAD {norad}: {e}"));
         }
     } else {
         right_ui.error = Some("Fetch service not available".to_string());
@@ -4091,7 +4083,7 @@ fn update_satellite_list(
 
     let parent = ui_entities.satellite_list;
 
-    for (norad_id, name_opt, flags, propagator_opt, error_opt, tle_opt) in sat_data.iter() {
+    for (norad_id, name_opt, flags, propagator_opt, error_opt, tle_opt) in &sat_data {
         let norad = norad_id.0;
         let is_tracking = selected.tracking == Some(norad);
         let (status_text, status_color) = if error_opt.is_some() {
@@ -4360,7 +4352,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         || !params.propagator_added_or_changed.is_empty()
         || !params.removed_propagators.is_empty()
     {
-        for (entity, binding, checked) in params.checkboxes.iter_mut() {
+        for (entity, binding, checked) in params.checkboxes {
             let should_check = match binding {
                 CheckboxBinding::ShowAxes => params.ui_state.show_axes,
                 CheckboxBinding::ShowArrows => params.arrows.enabled,
@@ -4411,7 +4403,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
             }
         }
 
-        for (entity, binding, checked) in params.range_modes.iter_mut() {
+        for (entity, binding, checked) in params.range_modes {
             let should_check = match binding {
                 RangeModeBinding::Auto => params.heatmap_cfg.range_mode == RangeMode::Auto,
                 RangeModeBinding::Fixed => params.heatmap_cfg.range_mode == RangeMode::Fixed,
@@ -4428,7 +4420,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
         }
 
         if let Some(selected_group) = params.right_ui.selected_group.as_deref() {
-            for (entity, choice, checked) in params.group_choices.iter_mut() {
+            for (entity, choice, checked) in params.group_choices {
                 let should_check = choice.0 == selected_group;
                 match (should_check, checked.is_some()) {
                     (true, false) => {
@@ -4482,7 +4474,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
             }
         }
 
-        for (entity, toggle, checked) in params.satellite_toggles.iter_mut() {
+        for (entity, toggle, checked) in params.satellite_toggles {
             if let Some(&sat_entity) = params.norad_index.map.get(&toggle.norad)
                 && let Ok(flags) = params.sat_flags.get(sat_entity)
             {
@@ -4506,7 +4498,7 @@ fn sync_widget_states(mut params: SyncWidgetStateParams<'_, '_>) {
             CameraFocusTarget::Earth => "Moon",
             CameraFocusTarget::Moon => "Earth",
         };
-        for mut text in params.focus_toggle_texts.iter_mut() {
+        for mut text in &mut params.focus_toggle_texts {
             text.0 = label.to_string();
         }
     }
@@ -4517,7 +4509,7 @@ fn sync_slider_visuals(
     children: Query<&Children>,
     mut texts: Query<&mut bevy::ui::widget::Text>,
 ) {
-    for (entity, value, range, precision, gradient) in sliders.iter_mut() {
+    for (entity, value, range, precision, gradient) in &mut sliders {
         if let Some(mut gradient) = gradient
             && let [Gradient::Linear(linear_gradient)] = &mut gradient.0[..]
         {
@@ -4526,12 +4518,11 @@ fn sync_slider_visuals(
             linear_gradient.stops[2].point = Val::Percent(percent_value);
         }
 
-        let precision = precision.map(|p| p.0).unwrap_or(0);
+        let precision = precision.map_or(0, |p| p.0);
         let label = format!("{}", value.0);
         let decimals_len = label
             .split_once('.')
-            .map(|(_, decimals)| decimals.len() as i32)
-            .unwrap_or(precision);
+            .map_or(precision, |(_, decimals)| decimals.len() as i32);
         let formatted = if precision >= 0 && decimals_len <= precision {
             format!("{:.precision$}", value.0, precision = precision as usize)
         } else {
@@ -4602,7 +4593,7 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                         if let Err(e) = fetch.cmd_tx.send(FetchCommand::FetchGroup {
                             group: group.clone(),
                         }) {
-                            params.right_ui.error = Some(format!("Failed to request group: {}", e));
+                            params.right_ui.error = Some(format!("Failed to request group: {e}"));
                             params.right_ui.group_loading = false;
                         } else {
                             params.right_ui.group_loading = true;
@@ -4755,21 +4746,21 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
             CheckboxBinding::ShowAxes => params.ui_state.show_axes = ev.value,
             CheckboxBinding::ShowArrows => params.arrows.enabled = ev.value,
             CheckboxBinding::GroundTracksEnabled => {
-                params.config_bundle.ground_track_cfg.enabled = ev.value
+                params.config_bundle.ground_track_cfg.enabled = ev.value;
             }
             CheckboxBinding::GizmoEnabled => params.config_bundle.gizmo_cfg.enabled = ev.value,
             CheckboxBinding::GizmoShowCenterDot => {
-                params.config_bundle.gizmo_cfg.show_center_dot = ev.value
+                params.config_bundle.gizmo_cfg.show_center_dot = ev.value;
             }
             CheckboxBinding::TrailsAll => {
-                for (mut flags, propagator_opt) in params.satellites.iter_mut() {
+                for (mut flags, propagator_opt) in &mut params.satellites {
                     if propagator_opt.is_some() {
                         flags.show_trail = ev.value;
                     }
                 }
             }
             CheckboxBinding::TracksAll => {
-                for (mut flags, propagator_opt) in params.satellites.iter_mut() {
+                for (mut flags, propagator_opt) in &mut params.satellites {
                     if propagator_opt.is_some() {
                         flags.show_ground_track = ev.value;
                     }
@@ -4778,7 +4769,7 @@ fn handle_checkbox_change(ev: On<ValueChange<bool>>, mut params: CheckboxChangeP
             CheckboxBinding::HeatmapEnabled => params.heatmap_cfg.enabled = ev.value,
             CheckboxBinding::AuroraOverlay => params.space_weather_cfg.aurora_enabled = ev.value,
             CheckboxBinding::LaunchPadMarkers => {
-                params.launch_library_cfg.show_pad_markers = ev.value
+                params.launch_library_cfg.show_pad_markers = ev.value;
             }
         }
         return;
@@ -4811,25 +4802,25 @@ fn handle_slider_change(
     match binding {
         SliderBinding::GroundTrackRadius => config_bundle.ground_track_cfg.radius_km = ev.value,
         SliderBinding::GizmoSegments => {
-            config_bundle.gizmo_cfg.circle_segments = ev.value.round().clamp(16.0, 128.0) as u32
+            config_bundle.gizmo_cfg.circle_segments = ev.value.round().clamp(16.0, 128.0) as u32;
         }
         SliderBinding::GizmoCenterDotSize => config_bundle.gizmo_cfg.center_dot_size = ev.value,
         SliderBinding::TrailMaxPoints => {
-            config_bundle.trail_cfg.max_points = ev.value.round().clamp(100.0, 10000.0) as usize
+            config_bundle.trail_cfg.max_points = ev.value.round().clamp(100.0, 10000.0) as usize;
         }
         SliderBinding::TrailUpdateInterval => {
-            config_bundle.trail_cfg.update_interval_seconds = ev.value
+            config_bundle.trail_cfg.update_interval_seconds = ev.value;
         }
         SliderBinding::HeatmapUpdatePeriod => heatmap_cfg.update_period_s = ev.value,
         SliderBinding::HeatmapOpacity => heatmap_cfg.color_alpha = ev.value,
         SliderBinding::HeatmapFixedMax => {
-            heatmap_cfg.fixed_max = Some(ev.value.round().clamp(1.0, 100.0) as u32)
+            heatmap_cfg.fixed_max = Some(ev.value.round().clamp(1.0, 100.0) as u32);
         }
         SliderBinding::HeatmapChunkSize => {
-            heatmap_cfg.chunk_size = ev.value.round().clamp(500.0, 5000.0) as usize
+            heatmap_cfg.chunk_size = ev.value.round().clamp(500.0, 5000.0) as usize;
         }
         SliderBinding::HeatmapChunksPerFrame => {
-            heatmap_cfg.chunks_per_frame = ev.value.round().clamp(1.0, 5.0) as usize
+            heatmap_cfg.chunks_per_frame = ev.value.round().clamp(1.0, 5.0) as usize;
         }
         SliderBinding::AuroraIntensity => {
             space_weather_cfg.aurora_intensity_scale = ev.value;
@@ -4842,7 +4833,7 @@ fn handle_slider_change(
         }
         SliderBinding::SatelliteSphereRadius => config_bundle.render_cfg.sphere_radius = ev.value,
         SliderBinding::SatelliteEmissiveIntensity => {
-            config_bundle.render_cfg.emissive_intensity = ev.value
+            config_bundle.render_cfg.emissive_intensity = ev.value;
         }
         SliderBinding::TrackingDistance => selected.tracking_offset = ev.value,
         SliderBinding::TrackingSmoothness => selected.smooth_factor = ev.value,
@@ -4943,7 +4934,7 @@ fn handle_group_color_plane_change(
         }
     }
 
-    for (slider, mut base_color) in q_slider.iter_mut() {
+    for (slider, mut base_color) in &mut q_slider {
         if slider.0 == plane.0 {
             base_color.0 = color;
         }
@@ -4967,7 +4958,7 @@ fn handle_group_color_green_change(
     let mut red = 0.0;
     let mut blue = 0.0;
 
-    for (plane, mut plane_value) in q_plane.iter_mut() {
+    for (plane, mut plane_value) in &mut q_plane {
         if plane.0 == slider.0 {
             plane_value.0.z = green;
             red = plane_value.0.x.clamp(0.0, 1.0);
@@ -4989,7 +4980,7 @@ fn handle_group_color_green_change(
         }
     }
 
-    for (slider_ref, mut base_color) in q_slider_base.iter_mut() {
+    for (slider_ref, mut base_color) in &mut q_slider_base {
         if slider_ref.0 == slider.0 {
             base_color.0 = color;
         }
@@ -5031,7 +5022,7 @@ fn handle_tooltip_toggle_click(
         .map(|node| node.display == Display::None)
         .unwrap_or(true);
 
-    for mut node in bubbles.p1().iter_mut() {
+    for mut node in &mut bubbles.p1() {
         node.display = Display::None;
     }
 
@@ -5186,7 +5177,7 @@ fn navigate_focus_with_arrows(
     }
 }
 
-/// System to dynamically manage the color picker UI based on editing_group_color
+/// System to dynamically manage the color picker UI based on `editing_group_color`
 fn manage_color_picker_system(
     mut commands: Commands,
     right_ui: Res<RightPanelUI>,
@@ -5365,7 +5356,7 @@ fn update_group_list_visuals(
     }
 
     let active_group = right_ui.editing_group_color.as_deref();
-    for (swatch, mut background, mut border) in swatches.iter_mut() {
+    for (swatch, mut background, mut border) in &mut swatches {
         if let Some(group) = group_registry.groups.get(&swatch.0) {
             background.0 = group.color;
         }
@@ -5381,7 +5372,7 @@ fn update_group_list_visuals(
         border.left = border_color;
     }
 
-    for (status, mut text, mut color) in status_texts.iter_mut() {
+    for (status, mut text, mut color) in &mut status_texts {
         let count = counts.get(status.0.as_str()).copied().unwrap_or(0);
         if count > 0 {
             text.0 = "Loaded".to_string();

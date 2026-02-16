@@ -143,7 +143,7 @@ fn draw_satellite_ground_track_gizmo(
     radius_km: f32,
 ) {
     // Find the nadir point (ground projection of satellite)
-    let nadir_point = sat_ecef_km.normalize() * (EARTH_RADIUS_KM as f64);
+    let nadir_point = sat_ecef_km.normalize() * f64::from(EARTH_RADIUS_KM);
 
     // Create local coordinate system at nadir point
     let up = nadir_point.normalize();
@@ -161,7 +161,7 @@ fn draw_satellite_ground_track_gizmo(
             nadir_point,
             right,
             forward,
-            config.center_dot_size as f64,
+            f64::from(config.center_dot_size),
             config.circle_color,
         );
     }
@@ -171,7 +171,7 @@ fn draw_satellite_ground_track_gizmo(
         nadir_point,
         right,
         forward,
-        radius_km as f64,
+        f64::from(radius_km),
         config.circle_color,
         config.circle_segments,
     );
@@ -187,11 +187,11 @@ fn draw_ground_track_circle(
     color: Color,
     segments: u32,
 ) {
-    let angle_step = 2.0 * PI / segments as f64;
+    let angle_step = 2.0 * PI / f64::from(segments);
     let mut points = Vec::with_capacity(segments as usize);
 
     for i in 0..segments {
-        let angle = i as f64 * angle_step;
+        let angle = f64::from(i) * angle_step;
         let cos_angle = angle.cos();
         let sin_angle = angle.sin();
 
@@ -232,5 +232,5 @@ fn draw_center_dot(
 
 /// Project a point onto the Earth's sphere surface
 fn project_to_sphere_surface(point: DVec3) -> DVec3 {
-    point.normalize() * (EARTH_RADIUS_KM as f64)
+    point.normalize() * f64::from(EARTH_RADIUS_KM)
 }

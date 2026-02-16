@@ -381,28 +381,32 @@ pub fn moon_position_ecef_km(utc: DateTime<Utc>, dut1_seconds: f64) -> DVec3 {
     let mut sum_b = 0.0;
 
     for term in LON_DIST_TERMS {
-        let arg_deg =
-            term.d as f64 * d + term.m as f64 * m + term.mp as f64 * mp + term.f as f64 * f;
+        let arg_deg = f64::from(term.d) * d
+            + f64::from(term.m) * m
+            + f64::from(term.mp) * mp
+            + f64::from(term.f) * f;
         let arg = arg_deg.to_radians();
         let e_factor = match term.m.abs() {
             1 => e,
             2 => e * e,
             _ => 1.0,
         };
-        sum_l += term.l as f64 * e_factor * arg.sin();
-        sum_r += term.r as f64 * e_factor * arg.cos();
+        sum_l += f64::from(term.l) * e_factor * arg.sin();
+        sum_r += f64::from(term.r) * e_factor * arg.cos();
     }
 
     for term in LAT_TERMS {
-        let arg_deg =
-            term.d as f64 * d + term.m as f64 * m + term.mp as f64 * mp + term.f as f64 * f;
+        let arg_deg = f64::from(term.d) * d
+            + f64::from(term.m) * m
+            + f64::from(term.mp) * mp
+            + f64::from(term.f) * f;
         let arg = arg_deg.to_radians();
         let e_factor = match term.m.abs() {
             1 => e,
             2 => e * e,
             _ => 1.0,
         };
-        sum_b += term.b as f64 * e_factor * arg.sin();
+        sum_b += f64::from(term.b) * e_factor * arg.sin();
     }
 
     let l_prime_rad = l_prime.to_radians();

@@ -66,7 +66,9 @@ pub struct SpaceWeatherState {
 
 impl Default for SpaceWeatherState {
     fn default() -> Self {
-        let now = Instant::now() - Duration::from_secs(3600);
+        let now = Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap();
         Self {
             last_ovation_request: now,
             last_kp_request: now,

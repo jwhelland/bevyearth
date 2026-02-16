@@ -225,10 +225,10 @@ pub fn create_default_group_colors(count: usize) -> Vec<Color> {
         .collect()
 }
 
-/// Initializes the GroupRegistry with all satellite groups and their default colors
+/// Initializes the `GroupRegistry` with all satellite groups and their default colors
 ///
-/// Creates a GroupRegistry resource populated with all predefined satellite groups
-/// from SATELLITE_GROUPS, each assigned a distinct color using golden angle distribution.
+/// Creates a `GroupRegistry` resource populated with all predefined satellite groups
+/// from `SATELLITE_GROUPS`, each assigned a distinct color using golden angle distribution.
 pub fn initialize_group_registry() -> GroupRegistry {
     let colors = create_default_group_colors(SATELLITE_GROUPS.len());
 

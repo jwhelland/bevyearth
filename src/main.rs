@@ -1,5 +1,3 @@
-// Inspired by https://blog.graysonhead.net/posts/bevy-proc-earth-1/
-
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;

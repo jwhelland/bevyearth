@@ -144,7 +144,7 @@ async fn fetch_ovation(client: &reqwest::Client) -> Result<AuroraGrid> {
     let mut points = Vec::new();
     let mut max_value = 0.0_f32;
 
-    for row in rows.iter() {
+    for row in &rows {
         let Some(lat) = parse_f32(get_cell(row, lat_idx)) else {
             continue;
         };
@@ -356,12 +356,12 @@ fn parse_object_rows(items: &[Value]) -> Result<JsonTable> {
     header.sort();
 
     let mut rows = Vec::new();
-    for row_val in items.iter() {
+    for row_val in items {
         let Some(obj) = row_val.as_object() else {
             continue;
         };
         let mut row = Vec::with_capacity(header.len());
-        for key in header.iter() {
+        for key in &header {
             let cell = obj.get(key).and_then(value_to_string).unwrap_or_default();
             row.push(cell);
         }
@@ -420,9 +420,9 @@ fn collect_candidate_triples(
         Value::Array(items) => {
             if items.len() >= 3
                 && let (Some(a), Some(b), Some(c)) = (
-                    items.first().and_then(|v| v.as_f64()),
-                    items.get(1).and_then(|v| v.as_f64()),
-                    items.get(2).and_then(|v| v.as_f64()),
+                    items.first().and_then(serde_json::Value::as_f64),
+                    items.get(1).and_then(serde_json::Value::as_f64),
+                    items.get(2).and_then(serde_json::Value::as_f64),
                 )
             {
                 let a = a as f32;
@@ -616,7 +616,7 @@ fn infer_ovation_columns(rows: &[Vec<String>]) -> Option<(usize, usize, usize)> 
     if row_count == 0 {
         return None;
     }
-    let col_count = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+    let col_count = rows.iter().map(std::vec::Vec::len).max().unwrap_or(0);
     if col_count == 0 {
         return None;
     }
@@ -627,7 +627,7 @@ fn infer_ovation_columns(rows: &[Vec<String>]) -> Option<(usize, usize, usize)> 
     let mut mins = vec![f32::INFINITY; col_count];
     let mut maxs = vec![f32::NEG_INFINITY; col_count];
 
-    for row in rows.iter() {
+    for row in rows {
         for (idx, cell) in row.iter().enumerate() {
             if let Some(value) = parse_f32(Some(cell.as_str())) {
                 numeric_counts[idx] += 1;

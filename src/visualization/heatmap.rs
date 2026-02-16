@@ -33,7 +33,7 @@ pub struct HeatmapConfig {
     pub color_alpha: f32,
     /// Range normalization mode
     pub range_mode: RangeMode,
-    /// Fixed maximum count for normalization (used when range_mode is Fixed)
+    /// Fixed maximum count for normalization (used when `range_mode` is Fixed)
     pub fixed_max: Option<u32>,
     /// Performance tuning: vertices to process per frame
     pub chunk_size: usize,
@@ -277,7 +277,7 @@ fn update_heatmap_system(
     {
         let positions = state.vertex_positions.clone();
         let satellites = satellite_positions_ecef.clone();
-        let earth_radius = EARTH_RADIUS_KM as f64;
+        let earth_radius = f64::from(EARTH_RADIUS_KM);
 
         let task = ComputeTaskPool::get().spawn(async move {
             let mut counts = vec![0u32; positions.len()];

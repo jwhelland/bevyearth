@@ -44,11 +44,11 @@ pub fn start_launch_library_worker() -> crate::launch_library::types::LaunchLibr
                 match result {
                     Ok(msg) => send(msg),
                     Err(err) => {
-                        eprintln!("[LAUNCH LIBRARY] {:?} fetch failed: {}", feed, err);
+                        eprintln!("[LAUNCH LIBRARY] {feed:?} fetch failed: {err}");
                         send(LaunchLibraryResult::Error {
                             feed,
                             error: err.to_string(),
-                        })
+                        });
                     }
                 }
             }
@@ -173,8 +173,8 @@ fn extract_items(value: &Value) -> Vec<&Value> {
 
 fn get_string(value: &Value, key: &str) -> Option<String> {
     match value.get(key) {
-        Some(Value::String(val)) => Some(val.to_string()),
-        Some(other) => other.as_str().map(|s| s.to_string()),
+        Some(Value::String(val)) => Some(val.clone()),
+        Some(other) => other.as_str().map(std::string::ToString::to_string),
         None => None,
     }
 }
@@ -201,11 +201,11 @@ fn get_f64(value: &Value, key: &str) -> Option<f64> {
 
 fn extract_name(value: &Value) -> Option<String> {
     match value {
-        Value::String(val) => Some(val.to_string()),
+        Value::String(val) => Some(val.clone()),
         Value::Object(map) => map
             .get("name")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+            .map(std::string::ToString::to_string),
         _ => None,
     }
 }
