@@ -47,7 +47,6 @@ This is a toy project to help me learn Bevy and Rust, along with a good dose of 
 - **Keyboard Shortcuts**:
   - `H`: Toggle left panel (visualization)
   - `J`: Toggle right panel (satellite controls)
-  - `K`: Toggle top panel
   - `L`: Toggle bottom panel (status)
   - `V`: Toggle 3D viewport cropping
 

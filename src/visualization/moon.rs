@@ -5,7 +5,6 @@ use bevy::prelude::*;
 
 use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
 use crate::orbital::MoonEcefKm;
-use crate::visualization::earth::generate_icosphere_with_radius;
 
 pub const MOON_RADIUS_KM: f32 = 1737.4;
 const MOON_TEXTURE_YAW_OFFSET_DEG: f32 = 0.0;
@@ -32,7 +31,8 @@ fn spawn_moon(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    let mesh = meshes.add(generate_icosphere_with_radius(5, MOON_RADIUS_KM));
+    let moon_mesh: Mesh = Sphere::new(MOON_RADIUS_KM).mesh().uv(180, 90);
+    let mesh = meshes.add(moon_mesh);
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(asset_server.load("moon_normal.png")),
