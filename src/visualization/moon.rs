@@ -1,6 +1,7 @@
 //! Moon rendering and transform updates.
 
 use bevy::math::DVec3;
+use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 
 use crate::core::space::{WorldEcefKm, ecef_to_bevy_km};
@@ -31,7 +32,24 @@ fn spawn_moon(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    let moon_mesh: Mesh = Sphere::new(MOON_RADIUS_KM).mesh().uv(180, 90);
+    let mut moon_mesh: Mesh = Sphere::new(MOON_RADIUS_KM).mesh().uv(180, 90);
+
+    // Bevy's UvSphere north pole is at local +Z.  The moon is tidal-locked via look_at so its
+    // local -Z faces Earth.  Without a fix the south pole texture would face Earth.
+    // We want: texture north (UvSphere +Z) → model +Y (top of face),
+    //          texture prime meridian equatorial (UvSphere -X, U=0.5) → model -Z (Earth-facing).
+    //   Rx(-90°): +Z → +Y  (align poles)
+    //   Ry(-90°): -X → -Z  (bring near-side center to Earth-facing direction)
+    let fix = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
+        * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    for attr in [Mesh::ATTRIBUTE_POSITION, Mesh::ATTRIBUTE_NORMAL] {
+        if let Some(VertexAttributeValues::Float32x3(vecs)) = moon_mesh.attribute_mut(attr) {
+            for v in vecs.iter_mut() {
+                *v = (fix * Vec3::from(*v)).into();
+            }
+        }
+    }
+
     let mesh = meshes.add(moon_mesh);
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
