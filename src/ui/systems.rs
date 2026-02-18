@@ -656,8 +656,8 @@ fn lock_camera_focus_to_target(
 
     // For the Moon we keep the camera fixed to a direction in Moon-local space so that
     // the same surface feature stays under the camera as the Moon orbits Earth.
-    if camera_focus.target == CameraFocusTarget::Moon {
-        if let Ok(moon_transform) = q_moon.single() {
+    if camera_focus.target == CameraFocusTarget::Moon
+        && let Ok(moon_transform) = q_moon.single() {
             let moon_rot = moon_transform.rotation;
 
             // Detect user camera movement (PanOrbitCamera changed pitch/yaw this frame).
@@ -689,7 +689,6 @@ fn lock_camera_focus_to_target(
             moon_cam.last_pitch = pitch;
             return;
         }
-    }
 
     let camera_pos = Vec3::new(
         radius * pitch.cos() * yaw.sin(),
