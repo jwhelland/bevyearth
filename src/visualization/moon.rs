@@ -50,11 +50,11 @@ fn spawn_moon(
         }
     }
 
+    moon_mesh.generate_tangents().unwrap();
     let mesh = meshes.add(moon_mesh);
     let material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
+        base_color: Color::srgb(0.5, 0.5, 0.5),
         base_color_texture: Some(asset_server.load("moon_normal.png")),
-        // normal_map_texture: Some(asset_server.load("moon_normal.png")),
         perceptual_roughness: 1.0,
         metallic: 0.0,
         ..default()

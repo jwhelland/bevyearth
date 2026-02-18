@@ -51,8 +51,9 @@ use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
 use crate::ui::state::{
     CameraFocusState, CameraFocusTarget, CameraPose, LaunchLibraryItemKind, LaunchLibrarySelection,
-    LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState,
+    LaunchLibraryUiState, MoonCameraState, RightPanelUI, UIState, UiLayoutState,
 };
+use crate::visualization::moon::Moon;
 use crate::visualization::{
     ArrowConfig, GroundTrackConfig, GroundTrackGizmoConfig, HeatmapConfig, RangeMode,
 };
@@ -635,6 +636,8 @@ fn lock_camera_focus_to_target(
     moon_pos: Res<MoonEcefKm>,
     sim_time: Res<SimulationTime>,
     dut1: Res<Dut1>,
+    mut moon_cam: ResMut<MoonCameraState>,
+    q_moon: Query<&Transform, (With<Moon>, Without<MainCamera>)>,
     mut q_camera: MainCameraQuery<'_, '_>,
 ) {
     let Ok((mut poc, mut transform)) = q_camera.single_mut() else {
@@ -650,6 +653,43 @@ fn lock_camera_focus_to_target(
     let radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
     let pitch = poc.pitch.unwrap_or(poc.target_pitch);
     let yaw = poc.yaw.unwrap_or(poc.target_yaw);
+
+    // For the Moon we keep the camera fixed to a direction in Moon-local space so that
+    // the same surface feature stays under the camera as the Moon orbits Earth.
+    if camera_focus.target == CameraFocusTarget::Moon {
+        if let Ok(moon_transform) = q_moon.single() {
+            let moon_rot = moon_transform.rotation;
+
+            // Detect user camera movement (PanOrbitCamera changed pitch/yaw this frame).
+            let user_moved = (yaw - moon_cam.last_yaw).abs() > 1e-6
+                || (pitch - moon_cam.last_pitch).abs() > 1e-6;
+
+            if user_moved || moon_cam.local_offset.is_none() {
+                // User moved the camera (or first init): record the current world-space
+                // direction in Moon's local frame so we can replay it next frame.
+                let world_dir = Vec3::new(
+                    pitch.cos() * yaw.sin(),
+                    pitch.sin(),
+                    pitch.cos() * yaw.cos(),
+                )
+                .normalize_or_zero();
+                moon_cam.local_offset = Some(moon_rot.inverse() * world_dir);
+            }
+
+            // Reconstruct the world-space camera direction from the stored local offset,
+            // using the Moon's *current* rotation.  This cancels the tidal-lock spin.
+            let local_dir = moon_cam.local_offset.unwrap_or(Vec3::Z);
+            let world_dir = (moon_rot * local_dir).normalize_or_zero();
+
+            let camera_pos = focus + world_dir * radius;
+            transform.translation = camera_pos;
+            transform.look_at(focus, Vec3::Y);
+
+            moon_cam.last_yaw = yaw;
+            moon_cam.last_pitch = pitch;
+            return;
+        }
+    }
 
     let camera_pos = Vec3::new(
         radius * pitch.cos() * yaw.sin(),
@@ -2518,7 +2558,7 @@ fn spawn_top_speed_row(parent: &mut ChildSpawnerCommands, time_scale: f32) {
                             SliderProps {
                                 value: time_scale,
                                 min: 1.0,
-                                max: 1000.0,
+                                max: 1_000.0,
                             },
                             (
                                 SliderBinding::TimeScale,

@@ -116,3 +116,16 @@ impl Default for CameraFocusState {
         }
     }
 }
+
+/// Tracks the camera's viewing direction in Moon-local coordinates so that the same
+/// surface feature stays under the camera regardless of the Moon's orbital motion.
+#[derive(Resource, Default)]
+pub struct MoonCameraState {
+    /// Unit direction from Moon center toward the camera, expressed in the Moon's local frame.
+    /// `None` until the camera has first been focused on the Moon.
+    pub local_offset: Option<bevy::prelude::Vec3>,
+    /// poc.yaw from the previous frame — used to detect user-initiated camera movement.
+    pub last_yaw: f32,
+    /// poc.pitch from the previous frame — used to detect user-initiated camera movement.
+    pub last_pitch: f32,
+}
