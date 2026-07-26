@@ -3536,13 +3536,17 @@ fn update_space_weather_texts(
     }
 
     for mut text in &mut texts.p4() {
-        let err = state
-            .ovation_error
-            .as_deref()
-            .or(state.kp_error.as_deref())
-            .or(state.mag_error.as_deref())
-            .or(state.plasma_error.as_deref());
-        text.0 = err.map(|e| format!("Data error: {e}")).unwrap_or_default();
+        let err = [
+            ("Aurora", state.ovation_error.as_deref()),
+            ("Kp", state.kp_error.as_deref()),
+            ("Mag", state.mag_error.as_deref()),
+            ("Plasma", state.plasma_error.as_deref()),
+        ]
+        .into_iter()
+        .find_map(|(feed, error)| error.map(|error| (feed, error)));
+        text.0 = err
+            .map(|(feed, error)| format!("{feed} data error: {error}"))
+            .unwrap_or_default();
     }
 
     for (mut text, mut color) in &mut texts.p5() {
@@ -3552,7 +3556,7 @@ fn update_space_weather_texts(
 
             if age_mins < 0 {
                 // Simulation time is behind forecast time
-                text.0 = format!("Forecast: {} min ahead", -age_mins);
+                text.0 = format!("Forecast: {} min ahead | night side", -age_mins);
                 color.0 = Color::srgba(0.5, 0.8, 1.0, 0.85);
             } else if age_mins > 60 {
                 text.0 = "⚠ Forecast expired".to_string();
@@ -3561,7 +3565,7 @@ fn update_space_weather_texts(
                 text.0 = "⚠ Forecast expiring soon".to_string();
                 color.0 = Color::srgba(1.0, 0.9, 0.3, 0.9);
             } else {
-                text.0 = format!("Forecast age: {age_mins} min");
+                text.0 = format!("Forecast age: {age_mins} min | night side");
                 color.0 = Color::srgba(0.6, 0.9, 0.6, 0.85);
             }
         } else {
