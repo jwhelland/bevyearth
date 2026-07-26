@@ -1,4 +1,4 @@
-use bevy::core_pipeline::Skybox;
+use bevy::light::Skybox;
 use bevy::prelude::Plugin;
 use bevy::{
     asset::LoadState,
@@ -43,12 +43,12 @@ fn asset_loaded(
             .unwrap_or(LoadState::NotLoaded)
             .is_loaded()
     {
-        let image = images.get_mut(&cubemap.image_handle).unwrap();
+        let mut image = images.get_mut(&cubemap.image_handle).unwrap();
         // NOTE: PNGs do not have any metadata that could indicate they contain a cubemap texture,
         // so they appear as one texture. The following code reconfigures the texture as necessary.
         if image.texture_descriptor.array_layer_count() == 1 {
-            if let Err(err) = image.reinterpret_stacked_2d_as_array(image.height() / image.width())
-            {
+            let array_layers = image.height() / image.width();
+            if let Err(err) = image.reinterpret_stacked_2d_as_array(array_layers) {
                 warn!("Failed to reinterpret skybox image as cubemap: {}", err);
                 cubemap.is_loaded = true;
                 return;
@@ -68,7 +68,7 @@ fn asset_loaded(
         && skybox.is_none()
     {
         commands.entity(camera_entity).insert(Skybox {
-            image: cubemap.image_handle.clone(),
+            image: Some(cubemap.image_handle.clone()),
             brightness: 500.0,
             ..default()
         });

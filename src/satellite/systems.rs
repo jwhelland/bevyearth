@@ -411,7 +411,7 @@ pub fn update_satellite_rendering_system(
     }
 
     for handle in group_materials.materials.values() {
-        if let Some(material) = materials.get_mut(handle) {
+        if let Some(mut material) = materials.get_mut(handle) {
             material.emissive = LinearRgba::from(material.base_color)
                 * emissive_scale(config_bundle.render_cfg.emissive_intensity);
         }
@@ -423,7 +423,7 @@ pub fn update_satellite_rendering_system(
 
         // Update material emissive intensity and base color
         if let Ok(material_handle) = material_query.get(entity)
-            && let Some(material) = materials.get_mut(&material_handle.0)
+            && let Some(mut material) = materials.get_mut(&material_handle.0)
         {
             material.base_color = satellite_color.0;
             material.emissive = LinearRgba::from(satellite_color.0)
@@ -455,7 +455,7 @@ pub fn update_group_colors_system(
     // Update cached group materials first (if any exist).
     for (group_url, group) in &registry.groups {
         if let Some(handle) = group_materials.materials.get(group_url)
-            && let Some(material) = materials.get_mut(handle)
+            && let Some(mut material) = materials.get_mut(handle)
         {
             material.base_color = group.color;
             material.emissive = LinearRgba::from(group.color)
@@ -471,7 +471,7 @@ pub fn update_group_colors_system(
             // Update the material for non-group-cached satellites
             if !group_materials.materials.contains_key(&group_url.0)
                 && let Ok(material_handle) = material_query.get(entity)
-                && let Some(material) = materials.get_mut(&material_handle.0)
+                && let Some(mut material) = materials.get_mut(&material_handle.0)
             {
                 material.base_color = group.color;
                 material.emissive = LinearRgba::from(group.color)

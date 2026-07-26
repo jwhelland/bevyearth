@@ -34,8 +34,8 @@ impl Material for SkyMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
-            depth_stencil.depth_compare = CompareFunction::LessEqual;
+            depth_stencil.depth_write_enabled = Some(false);
+            depth_stencil.depth_compare = Some(CompareFunction::LessEqual);
         }
         Ok(())
     }
