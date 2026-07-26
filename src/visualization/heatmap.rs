@@ -237,7 +237,7 @@ fn update_heatmap_system(
         return;
     };
 
-    let mesh = match meshes.get_mut(&mesh3d.0) {
+    let mut mesh = match meshes.get_mut(&mesh3d.0) {
         Some(mesh) => mesh,
         None => return,
     };
@@ -260,12 +260,12 @@ fn update_heatmap_system(
 
     if satellite_positions_ecef.is_empty() {
         // No satellites - completely hide the heatmap overlay
-        if let Some(material) = materials.get_mut(&material3d.0) {
+        if let Some(mut material) = materials.get_mut(&material3d.0) {
             material.base_color.set_alpha(0.0);
         }
 
         // Clear vertex colors so they don't interfere
-        clear_vertex_colors(mesh);
+        clear_vertex_colors(&mut mesh);
 
         state.last_update_instant = Instant::now();
         return;
@@ -301,9 +301,14 @@ fn update_heatmap_system(
             state.vertex_counts = counts;
             let counts = state.vertex_counts.clone();
 
-            apply_colors_to_mesh(mesh, &counts, &config, state.color_buffer.as_mut_slice());
+            apply_colors_to_mesh(
+                &mut mesh,
+                &counts,
+                &config,
+                state.color_buffer.as_mut_slice(),
+            );
 
-            if let Some(material) = materials.get_mut(&material3d.0) {
+            if let Some(mut material) = materials.get_mut(&material3d.0) {
                 material.base_color.set_alpha(1.0);
             }
         } else {
@@ -407,7 +412,7 @@ fn toggle_heatmap_visibility(
 ) {
     if config.is_changed()
         && let Ok((mesh3d, material3d, mut visibility)) = heatmap_query.single_mut()
-        && let Some(material) = materials.get_mut(&material3d.0)
+        && let Some(mut material) = materials.get_mut(&material3d.0)
     {
         if config.enabled {
             *visibility = Visibility::Visible;
@@ -419,8 +424,8 @@ fn toggle_heatmap_visibility(
             material.base_color.set_alpha(0.0);
 
             // Also clear vertex colors to prevent lingering effects
-            if let Some(mesh) = meshes.get_mut(&mesh3d.0) {
-                clear_vertex_colors(mesh);
+            if let Some(mut mesh) = meshes.get_mut(&mesh3d.0) {
+                clear_vertex_colors(&mut mesh);
             }
         }
     }

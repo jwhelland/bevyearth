@@ -16,13 +16,15 @@ use std::thread;
 
 const OVATION_URL: &str = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
 const KP_URL: &str = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json";
-const MAG_URL: &str = "https://services.swpc.noaa.gov/products/solar-wind/mag-1-day.json";
-const PLASMA_URL: &str = "https://services.swpc.noaa.gov/products/solar-wind/plasma-1-day.json";
+const MAG_URL: &str = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json";
+const PLASMA_URL: &str = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json";
 
 struct JsonTable {
     header: Vec<String>,
     rows: Vec<Vec<String>>,
 }
+
+type TimedValuePair = (Option<f32>, Option<f32>, Option<DateTime<Utc>>);
 
 pub fn start_space_weather_worker() -> SpaceWeatherChannels {
     let (cmd_tx, cmd_rx) = mpsc::channel::<SpaceWeatherCommand>();
@@ -193,19 +195,26 @@ async fn fetch_kp(client: &reqwest::Client) -> Result<KpIndex> {
     })
 }
 
-async fn fetch_mag(
-    client: &reqwest::Client,
-) -> Result<(Option<f32>, Option<f32>, Option<DateTime<Utc>>)> {
+async fn fetch_mag(client: &reqwest::Client) -> Result<TimedValuePair> {
     let body = fetch_body(client, MAG_URL).await?;
-    let table = parse_json_table(&body)?;
+    parse_mag(&body)
+}
+
+fn parse_mag(body: &str) -> Result<TimedValuePair> {
+    let table = parse_json_table(body)?;
 
     let bt_idx = find_column(&table.header, &["bt", "bt_gsm"]);
     let bz_idx = find_column(&table.header, &["bz_gsm", "bz", "bz_gse"]);
     let time_idx = find_column(&table.header, &["time_tag", "timestamp", "time"]);
+    let active_idx = find_column(&table.header, &["active"]);
 
-    let bt = bt_idx.and_then(|idx| latest_numeric(&table.rows, idx));
-    let bz = bz_idx.and_then(|idx| latest_numeric(&table.rows, idx));
-    let timestamp = latest_timestamp(&table.rows, time_idx);
+    let bt_sample = bt_idx
+        .and_then(|idx| latest_numeric_with_time_filtered(&table.rows, idx, time_idx, active_idx));
+    let bz_sample = bz_idx
+        .and_then(|idx| latest_numeric_with_time_filtered(&table.rows, idx, time_idx, active_idx));
+    let timestamp = latest_sample_timestamp([bt_sample, bz_sample]);
+    let bt = bt_sample.map(|(value, _)| value);
+    let bz = bz_sample.map(|(value, _)| value);
 
     if bt.is_none() && bz.is_none() {
         anyhow::bail!("mag: missing bt/bz values");
@@ -214,19 +223,26 @@ async fn fetch_mag(
     Ok((bt, bz, timestamp))
 }
 
-async fn fetch_plasma(
-    client: &reqwest::Client,
-) -> Result<(Option<f32>, Option<f32>, Option<DateTime<Utc>>)> {
+async fn fetch_plasma(client: &reqwest::Client) -> Result<TimedValuePair> {
     let body = fetch_body(client, PLASMA_URL).await?;
-    let table = parse_json_table(&body)?;
+    parse_plasma(&body)
+}
+
+fn parse_plasma(body: &str) -> Result<TimedValuePair> {
+    let table = parse_json_table(body)?;
 
     let speed_idx = find_column(&table.header, &["speed", "proton_speed"]);
     let density_idx = find_column(&table.header, &["density", "proton_density"]);
     let time_idx = find_column(&table.header, &["time_tag", "timestamp", "time"]);
+    let active_idx = find_column(&table.header, &["active"]);
 
-    let speed = speed_idx.and_then(|idx| latest_numeric(&table.rows, idx));
-    let density = density_idx.and_then(|idx| latest_numeric(&table.rows, idx));
-    let timestamp = latest_timestamp(&table.rows, time_idx);
+    let speed_sample = speed_idx
+        .and_then(|idx| latest_numeric_with_time_filtered(&table.rows, idx, time_idx, active_idx));
+    let density_sample = density_idx
+        .and_then(|idx| latest_numeric_with_time_filtered(&table.rows, idx, time_idx, active_idx));
+    let timestamp = latest_sample_timestamp([speed_sample, density_sample]);
+    let speed = speed_sample.map(|(value, _)| value);
+    let density = density_sample.map(|(value, _)| value);
 
     if speed.is_none() && density.is_none() {
         anyhow::bail!("plasma: missing speed/density values");
@@ -390,12 +406,19 @@ fn normalize_key(value: &str) -> String {
 
 fn find_column(header: &[String], candidates: &[&str]) -> Option<usize> {
     let normalized: Vec<String> = header.iter().map(|h| normalize_key(h)).collect();
-    for (idx, name) in normalized.iter().enumerate() {
-        for candidate in candidates {
-            let needle = normalize_key(candidate);
-            if name == &needle || name.contains(&needle) {
-                return Some(idx);
-            }
+    let needles: Vec<String> = candidates
+        .iter()
+        .map(|candidate| normalize_key(candidate))
+        .collect();
+
+    for needle in &needles {
+        if let Some(idx) = normalized.iter().position(|name| name == needle) {
+            return Some(idx);
+        }
+    }
+    for needle in &needles {
+        if let Some(idx) = normalized.iter().position(|name| name.contains(needle)) {
+            return Some(idx);
         }
     }
     None
@@ -687,10 +710,42 @@ fn infer_ovation_columns(rows: &[Vec<String>]) -> Option<(usize, usize, usize)> 
     value_idx.map(|value| (lat_idx, lon_idx, value))
 }
 
-fn latest_numeric(rows: &[Vec<String>], idx: usize) -> Option<f32> {
+fn latest_row_with_numeric<'a>(
+    rows: &'a [Vec<String>],
+    value_indices: &[usize],
+    time_idx: Option<usize>,
+    active_idx: Option<usize>,
+) -> Option<(&'a [String], Option<DateTime<Utc>>)> {
+    let has_numeric = |row: &[String]| {
+        value_indices
+            .iter()
+            .any(|idx| parse_f32(get_cell(row, *idx)).is_some())
+    };
+    let is_active = |row: &[String]| {
+        active_idx.is_none_or(|idx| {
+            get_cell(row, idx)
+                .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")
+        })
+    };
+
+    if let Some(time_idx) = time_idx
+        && let Some((row, timestamp)) = rows
+            .iter()
+            .filter(|row| is_active(row) && has_numeric(row))
+            .filter_map(|row| {
+                get_cell(row, time_idx)
+                    .and_then(parse_timestamp)
+                    .map(|timestamp| (row.as_slice(), timestamp))
+            })
+            .max_by_key(|(_, timestamp)| *timestamp)
+    {
+        return Some((row, Some(timestamp)));
+    }
+
     rows.iter()
         .rev()
-        .find_map(|row| parse_f32(get_cell(row, idx)))
+        .find(|row| is_active(row) && has_numeric(row))
+        .map(|row| (row.as_slice(), None))
 }
 
 fn latest_numeric_with_time(
@@ -698,24 +753,33 @@ fn latest_numeric_with_time(
     idx: usize,
     time_idx: Option<usize>,
 ) -> Option<(f32, Option<DateTime<Utc>>)> {
-    for row in rows.iter().rev() {
-        if let Some(value) = parse_f32(get_cell(row, idx)) {
-            let timestamp =
-                time_idx.and_then(|t_idx| get_cell(row, t_idx).and_then(parse_timestamp));
-            return Some((value, timestamp));
-        }
-    }
-    None
+    latest_numeric_with_time_filtered(rows, idx, time_idx, None)
+}
+
+fn latest_numeric_with_time_filtered(
+    rows: &[Vec<String>],
+    idx: usize,
+    time_idx: Option<usize>,
+    active_idx: Option<usize>,
+) -> Option<(f32, Option<DateTime<Utc>>)> {
+    let (row, timestamp) = latest_row_with_numeric(rows, &[idx], time_idx, active_idx)?;
+    Some((parse_f32(get_cell(row, idx))?, timestamp))
+}
+
+fn latest_sample_timestamp(
+    samples: [Option<(f32, Option<DateTime<Utc>>)>; 2],
+) -> Option<DateTime<Utc>> {
+    samples
+        .into_iter()
+        .filter_map(|sample| sample.and_then(|(_, timestamp)| timestamp))
+        .max()
 }
 
 fn latest_timestamp(rows: &[Vec<String>], time_idx: Option<usize>) -> Option<DateTime<Utc>> {
     let t_idx = time_idx?;
-    for row in rows.iter().rev() {
-        if let Some(ts) = get_cell(row, t_idx).and_then(parse_timestamp) {
-            return Some(ts);
-        }
-    }
-    None
+    rows.iter()
+        .filter_map(|row| get_cell(row, t_idx).and_then(parse_timestamp))
+        .max()
 }
 
 fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
@@ -726,11 +790,15 @@ fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
         return Some(dt.with_timezone(&Utc));
     }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
-        return Some(Utc.from_utc_datetime(&dt));
-    }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
-        return Some(Utc.from_utc_datetime(&dt));
+    for format in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ] {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(value, format) {
+            return Some(Utc.from_utc_datetime(&dt));
+        }
     }
     None
 }
@@ -760,6 +828,117 @@ mod tests {
         let time_idx = find_column(&table.header, &["time_tag"]);
         let (value, _) = latest_numeric_with_time(&table.rows, kp_idx, time_idx).unwrap();
         assert!((value - 2.67).abs() < 1e-4);
+    }
+
+    #[test]
+    fn parse_latest_numeric_from_newest_first_object_rows() {
+        let body = r#"[
+            {"time_tag":"2024-01-01T03:00:00","bt":2.67},
+            {"time_tag":"2024-01-01T00:00:00","bt":1.0}
+        ]"#;
+        let table = parse_json_table(body).unwrap();
+        let bt_idx = find_column(&table.header, &["bt"]).unwrap();
+        let time_idx = find_column(&table.header, &["time_tag"]);
+        let (value, timestamp) = latest_numeric_with_time(&table.rows, bt_idx, time_idx).unwrap();
+        assert!((value - 2.67).abs() < 1e-4);
+        assert_eq!(
+            timestamp,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 3, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_rtsw_mag_payload() {
+        let body = r#"[
+            {"time_tag":"2024-01-01T03:00:00","bt":5.2,"bz_gsm":-1.7},
+            {"time_tag":"2024-01-01T02:00:00","bt":4.8,"bz_gsm":0.4}
+        ]"#;
+        let (bt, bz, timestamp) = parse_mag(body).unwrap();
+        assert_eq!(bt, Some(5.2));
+        assert_eq!(bz, Some(-1.7));
+        assert_eq!(
+            timestamp,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 3, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_rtsw_plasma_payload() {
+        let body = r#"[
+            {
+                "time_tag":"2024-01-01T03:00:00",
+                "alpha_speed":null,
+                "alpha_density":null,
+                "proton_speed":502.7,
+                "proton_density":1.03
+            },
+            {
+                "time_tag":"2024-01-01T02:00:00",
+                "alpha_speed":null,
+                "alpha_density":null,
+                "proton_speed":490.2,
+                "proton_density":0.81
+            }
+        ]"#;
+        let (speed, density, timestamp) = parse_plasma(body).unwrap();
+        assert_eq!(speed, Some(502.7));
+        assert_eq!(density, Some(1.03));
+        assert_eq!(
+            timestamp,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 3, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_rtsw_mag_prefers_active_source_during_handoff() {
+        let body = r#"[
+            {
+                "time_tag":"2024-01-01T03:00:00",
+                "active":true,
+                "source":"SOLAR1",
+                "bt":5.2,
+                "bz_gsm":-1.7
+            },
+            {
+                "time_tag":"2024-01-01T03:00:00",
+                "active":false,
+                "source":"ACE",
+                "bt":9.8,
+                "bz_gsm":4.6
+            }
+        ]"#;
+        let (bt, bz, timestamp) = parse_mag(body).unwrap();
+        assert_eq!(bt, Some(5.2));
+        assert_eq!(bz, Some(-1.7));
+        assert_eq!(
+            timestamp,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 3, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_rtsw_plasma_retains_latest_value_for_each_metric() {
+        let body = r#"[
+            {
+                "time_tag":"2024-01-01T03:00:00",
+                "active":true,
+                "proton_speed":510.0,
+                "proton_density":null
+            },
+            {
+                "time_tag":"2024-01-01T02:00:00",
+                "active":true,
+                "proton_speed":500.0,
+                "proton_density":1.2
+            }
+        ]"#;
+        let (speed, density, timestamp) = parse_plasma(body).unwrap();
+        assert_eq!(speed, Some(510.0));
+        assert_eq!(density, Some(1.2));
+        assert_eq!(
+            timestamp,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 3, 0, 0).unwrap())
+        );
     }
 
     #[test]

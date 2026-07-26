@@ -221,7 +221,7 @@ pub fn update_aurora_texture(
     let Some(image_handle) = render_state.image_handle.clone() else {
         return;
     };
-    let Some(image) = images.get_mut(&image_handle) else {
+    let Some(mut image) = images.get_mut(&image_handle) else {
         return;
     };
 
@@ -428,8 +428,10 @@ pub fn update_aurora_texture(
 
     // Workaround for Bevy runtime-created asset change detection (bevyengine/bevy#17220):
     // touching the material forces it to re-check its dependent textures on the GPU.
-    if let Some(ref mat_handle) = render_state.material_handle {
-        materials.get_mut(mat_handle);
+    if let Some(ref mat_handle) = render_state.material_handle
+        && let Some(material) = materials.get_mut(mat_handle)
+    {
+        let _ = material.into_inner();
     }
 }
 

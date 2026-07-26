@@ -7,9 +7,27 @@ use bevy::window::{PresentMode, Window, WindowPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
-use bevy::core_pipeline::Skybox;
+use bevy::camera::Hdr;
 #[cfg(feature = "dev")]
 use bevy::dev_tools::fps_overlay::FpsOverlayPlugin;
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy::feathers::{FeathersPlugins, dark_theme::create_dark_theme, palette, theme::UiTheme};
+#[cfg(any(
+    all(
+        not(feature = "debug_basic_scene"),
+        not(feature = "debug_scene_camera")
+    ),
+    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+))]
+use bevy::input_focus::directional_navigation::DirectionalNavigationPlugin;
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use bevy::light::Skybox;
 #[cfg(any(
     all(
         not(feature = "debug_basic_scene"),
@@ -28,8 +46,6 @@ use bevy::light::{GlobalAmbientLight, SunDisk};
 use bevy::picking::prelude::MeshPickingPlugin;
 #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 use bevy::post_process::bloom::Bloom;
-#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
-use bevy::render::view::Hdr;
 #[cfg(all(
     feature = "dev_camera",
     any(
@@ -41,22 +57,6 @@ use bevy::render::view::Hdr;
     )
 ))]
 use bevy_camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
-#[cfg(any(
-    all(
-        not(feature = "debug_basic_scene"),
-        not(feature = "debug_scene_camera")
-    ),
-    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
-))]
-use bevy_feathers::{FeathersPlugins, dark_theme::create_dark_theme, palette, theme::UiTheme};
-#[cfg(any(
-    all(
-        not(feature = "debug_basic_scene"),
-        not(feature = "debug_scene_camera")
-    ),
-    all(feature = "debug_basic_scene", feature = "debug_scene_camera")
-))]
-use bevy_input_focus::directional_navigation::DirectionalNavigationPlugin;
 
 mod core;
 mod launch_library;
@@ -84,6 +84,8 @@ use launch_library::LaunchLibraryPlugin;
     all(feature = "debug_basic_scene", feature = "debug_scene_camera")
 ))]
 use orbital::OrbitalPlugin;
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+use orbital::{Dut1, SimulationTime};
 #[cfg(any(
     all(
         not(feature = "debug_basic_scene"),
@@ -117,7 +119,7 @@ use tle::TlePlugin;
 ))]
 use ui::{MainCamera, SkyboxPlugin, UiPlugin, skybox::Cubemap};
 #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
-use ui::{SkyboxPlugin, skybox::Cubemap};
+use ui::{MainCamera, SkyboxPlugin, skybox::Cubemap};
 #[cfg(any(
     all(
         not(feature = "debug_basic_scene"),
@@ -318,12 +320,15 @@ fn setup_debug_scene_camera(
             Bloom::NATURAL,
             Tonemapping::TonyMcMapface,
             PanOrbitCamera::default(),
+            MainCamera,
             Transform::from_xyz(25_000.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
             Name::new("Debug Camera"),
         ))
         .id();
 
     commands.insert_resource(DebugSceneCamera { entity: camera });
+    commands.insert_resource(SimulationTime::default());
+    commands.insert_resource(Dut1::default());
     commands.insert_resource(Cubemap {
         is_loaded: false,
         image_handle: skybox_handle,
@@ -349,7 +354,7 @@ fn toggle_debug_scene_components(
             info!("Debug scene: Skybox OFF (press 1)");
         } else {
             commands.entity(cam.entity).insert(Skybox {
-                image: asset_server.load("skybox.png"),
+                image: Some(asset_server.load("skybox.png")),
                 brightness: 1000.0,
                 ..default()
             });
@@ -428,7 +433,7 @@ fn main() {
                 ..default()
             })
             .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings { ..default() }),
+                render_creation: RenderCreation::Automatic(Box::new(WgpuSettings { ..default() })),
                 ..default()
             }),
     );
