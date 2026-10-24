@@ -57,26 +57,13 @@ Keyboard testing exposed a missing root tab group. The root group and hidden-sec
 
 Use `cargo run --features debug_scene_camera` for the shader diagnostic: **1** toggles the built-in sky and **2** toggles the custom WESL sky. The custom sky starts hidden. `cargo run --features debug_basic_scene` runs the minimal sphere/camera diagnostic. `cargo run --release --features dev,dev_camera` enables the FPS overlay and F2 camera.
 
-Screenshots:
-
-- [Pre-upgrade visual reference](screenshots/bevy-0.20/0.19-baseline.png)
-- [Upgraded Earth](screenshots/bevy-0.20/0.20-earth.png)
-- [Migrated panels](screenshots/bevy-0.20/0.20-panels.png)
-- [Moon at accelerated time](screenshots/bevy-0.20/0.20-moon-fast.png)
-- [ISS tracking](screenshots/bevy-0.20/0.20-tracking.png)
-- [Launch fly-to and popup](screenshots/bevy-0.20/0.20-launch.png)
-- [Custom WESL sky diagnostic](screenshots/bevy-0.20/0.20-custom-sky.png)
-- [Color picker](screenshots/bevy-0.20/0.20-color-picker.png)
-- [Tooltip after keyboard navigation](screenshots/bevy-0.20/0.20-keyboard-tooltip.png)
-- [Ground tracks, trails, and heatmap](screenshots/bevy-0.20/0.20-tracks.png)
-
 ## Release performance comparison
 
-The pre-upgrade source at commit `e90dc8b` was built separately with Bevy 0.19 and Rust 1.95, outside the working checkout. Each version ran separately with the same cached ISS satellite, default 25,000 km Earth view, default textures, hidden side panels, uncropped viewport, 1x simulation, and AutoVsync. Both had the FPS overlay enabled. Captures are 2560 x 1536 pixels including the window title bar. Compilation had completed before measurement. The upgraded build also included the inactive development camera.
+The pre-upgrade source at commit `e90dc8b` was built separately with Bevy 0.19 and Rust 1.95, outside the working checkout. Each version ran separately with the same cached ISS satellite, default 25,000 km Earth view, default textures, hidden side panels, uncropped viewport, 1x simulation, and AutoVsync. Both had the FPS overlay enabled and a 2560 x 1536 pixel window including the title bar. Compilation had completed before measurement. The upgraded build also included the inactive development camera.
 
-| Build | Visible FPS reading | Evidence |
-| --- | ---: | --- |
-| Bevy 0.19 release | 120.83 | [Capture](screenshots/bevy-0.20/0.19-release-performance.png) |
-| Bevy 0.20 release | 119.85 | [Capture](screenshots/bevy-0.20/0.20-release-performance.png) |
+| Build | Visible FPS reading |
+| --- | ---: |
+| Bevy 0.19 release | 120.83 |
+| Bevy 0.20 release | 119.85 |
 
-Both readings are near the display's 120 Hz ceiling. This is a light-scene regression check, not a statistically sampled throughput benchmark or evidence about large satellite groups. Live time and weather changed between captures, so the images are not pixel-comparison fixtures.
+Both readings are near the display's 120 Hz ceiling. This is a light-scene regression check, not a statistically sampled throughput benchmark or evidence about large satellite groups. Live time and weather changed between runs.
