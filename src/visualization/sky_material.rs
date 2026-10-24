@@ -15,11 +15,11 @@ pub struct SkyMaterial {
 
 impl Material for SkyMaterial {
     fn vertex_shader() -> ShaderRef {
-        "shaders/sky_material.wgsl".into()
+        "shaders/sky_material.wesl".into()
     }
 
     fn fragment_shader() -> ShaderRef {
-        "shaders/sky_material.wgsl".into()
+        "shaders/sky_material.wesl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {
@@ -35,7 +35,7 @@ impl Material for SkyMaterial {
         descriptor.primitive.cull_mode = None;
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
             depth_stencil.depth_write_enabled = Some(false);
-            depth_stencil.depth_compare = Some(CompareFunction::LessEqual);
+            depth_stencil.depth_compare = Some(CompareFunction::GreaterEqual);
         }
         Ok(())
     }

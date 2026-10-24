@@ -8,7 +8,7 @@ use bevy::math::DVec3;
 use bevy::mesh::{
     ConeAnchor, ConeMeshBuilder, CylinderAnchor, CylinderMeshBuilder, TorusMeshBuilder,
 };
-use bevy::picking::events::{Click, Pointer};
+use bevy::picking::events::PointerClick;
 use bevy::prelude::AlphaMode;
 use bevy::prelude::ChildOf;
 use bevy::prelude::*;
@@ -328,7 +328,7 @@ fn animate_pulse_rings(time: Res<Time>, mut rings: Query<(&PulseRing, &mut Trans
 }
 
 fn handle_launch_pad_clicks(
-    mut click_events: MessageReader<Pointer<Click>>,
+    mut click_events: MessageReader<PointerClick>,
     markers: Query<&LaunchPadMarker>,
     parents: Query<&ChildOf>,
     data: Res<LaunchLibraryData>,

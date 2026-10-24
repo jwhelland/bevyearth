@@ -29,7 +29,7 @@ This is a toy project to help me learn Bevy and Rust, along with a good dose of 
 
 ## Getting Started
 
-1. Install Rust from [rustup.rs](https://rustup.rs/)
+1. Install Rust from [rustup.rs](https://rustup.rs/). This project uses Rust **1.97.1** (pinned in `rust-toolchain.toml`) and Bevy **0.20**.
 2. Clone this repository
 3. Run `cargo run` to start the application
 4. Use the mouse to navigate around Earth and the UI panel to manage satellites
@@ -37,10 +37,11 @@ This is a toy project to help me learn Bevy and Rust, along with a good dose of 
 ## Docs
 
 - [Coordinate frames](docs/coordinates.md)
+- [Bevy 0.20 migration and validation](docs/bevy-0.20-upgrade.md)
 
 ## Controls
 
-- **Mouse**: Rotate and zoom around Earth
+- **Mouse**: Left drag orbits the active Earth/Moon center; the wheel or trackpad scroll zooms. Panning is disabled to keep the body centered. Camera input pauses over UI panels and during automatic tracking.
 - **Top Bar**: Time controls, quick panel toggles, and camera shortcuts
 - **Left/Right Panels**: Manage satellite groups, individual satellites, and visualization options
 - **Satellite Tracking**: Click any satellite's NORAD ID to start camera tracking

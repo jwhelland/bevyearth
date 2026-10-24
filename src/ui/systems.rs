@@ -1,5 +1,6 @@
 //! UI systems for the Bevy UI interface
 
+use crate::camera::{CameraInputBlocker, CameraRequest};
 use bevy::app::PropagateSet;
 use bevy::camera::Viewport;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
@@ -9,7 +10,6 @@ use bevy::feathers::controls::{
     ButtonVariant, ColorChannel, ColorPlaneValue, FeathersButton, FeathersCheckbox,
     FeathersColorPlane, FeathersColorSlider, FeathersRadio, FeathersSlider, SliderBaseColor,
 };
-use bevy::feathers::cursor::EntityCursor;
 use bevy::feathers::font_styles::InheritableFont;
 use bevy::feathers::theme::{InheritableThemeTextColor, ThemedText};
 use bevy::feathers::tokens;
@@ -17,10 +17,12 @@ use bevy::input::keyboard::KeyCode;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::{ButtonInput, ButtonState};
 use bevy::input_focus::{
-    FocusCause, FocusedInput, InputFocus, InputFocusVisible, tab_navigation::TabIndex,
+    FocusCause, FocusedInput, InputFocus, InputFocusVisible,
+    tab_navigation::{TabGroup, TabIndex},
 };
 use bevy::picking::Pickable;
-use bevy::picking::events::{Click, Drag, DragEnd, DragStart, Pointer};
+use bevy::picking::cursor::EntityCursor;
+use bevy::picking::events::{PointerClick, PointerDrag, PointerDragEnd, PointerDragStart};
 use bevy::prelude::*;
 use bevy::scene::EntityCommandsSceneExt;
 use bevy::text::{FontSize, FontSource, FontWeight, TextColor, TextLayout};
@@ -32,15 +34,11 @@ use bevy::ui_widgets::{
     SliderValue, ValueChange, checkbox_self_update, slider_self_update,
 };
 use bevy::window::{PrimaryWindow, SystemCursorIcon};
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::core::coordinates::Coordinates;
-use crate::core::space::ecef_to_bevy_km;
 use crate::launch_library::{LaunchLibraryConfig, LaunchLibraryData, LaunchLibraryState};
 use crate::orbital::time::SimulationTime;
-use crate::orbital::{Dut1, MoonEcefKm, moon_position_ecef_km};
 use crate::satellite::components::{
     NoradId, PropagationError, Propagator, Satellite, SatelliteColor, SatelliteFlags,
     SatelliteGroupUrl, SatelliteName, TleComponent,
@@ -51,15 +49,12 @@ use crate::space_weather::{AuroraGrid, KpIndex, SolarWind, SpaceWeatherConfig, S
 use crate::tle::{FetchChannels, FetchCommand};
 use crate::ui::groups::SATELLITE_GROUPS;
 use crate::ui::state::{
-    CameraFocusState, CameraFocusTarget, CameraPose, LaunchLibraryItemKind, LaunchLibrarySelection,
-    LaunchLibraryUiState, MoonCameraState, RightPanelUI, UIState, UiLayoutState,
+    CameraFocusState, CameraFocusTarget, LaunchLibraryItemKind, LaunchLibrarySelection,
+    LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState,
 };
-use crate::visualization::moon::Moon;
 use crate::visualization::{
     ArrowConfig, GroundTrackConfig, GroundTrackGizmoConfig, HeatmapConfig, RangeMode,
 };
-
-const MOON_FOCUS_DISTANCE_KM: f32 = 10_000.0;
 
 /// Configuration bundle to reduce parameter count
 #[derive(Resource, Default)]
@@ -69,6 +64,9 @@ pub struct UiConfigBundle {
     pub trail_cfg: OrbitTrailConfig,
     pub render_cfg: SatelliteRenderConfig,
 }
+
+#[derive(Component)]
+struct UiDisplayVisibility;
 
 #[derive(Resource)]
 struct UiEntities {
@@ -117,8 +115,7 @@ struct RightPanelScroll;
 #[derive(Component)]
 struct LeftPanelScroll;
 
-#[derive(Component)]
-pub struct MainCamera;
+pub use crate::camera::MainCamera;
 
 #[derive(Component)]
 struct TimeText;
@@ -209,12 +206,11 @@ fn spawn_feathers_slider<B: Bundle>(
     entity
         .apply_scene(bsn! {
             @FeathersSlider {
-                @value: {value},
                 @min: {min},
                 @max: {max},
             }
         })
-        .insert(overrides);
+        .insert((SliderValue(value), overrides));
     entity.id()
 }
 
@@ -541,9 +537,6 @@ type SliderVisualQuery<'w, 's> = Query<
     With<Slider>,
 >;
 
-type MainCameraQuery<'w, 's> =
-    Query<'w, 's, (&'static mut PanOrbitCamera, &'static mut Transform), With<MainCamera>>;
-
 type SatListQuery<'w, 's> = Query<
     'w,
     's,
@@ -607,10 +600,7 @@ struct ButtonActivateParams<'w, 's> {
     selected: ResMut<'w, SelectedSatellite>,
     sim_time: ResMut<'w, crate::orbital::SimulationTime>,
     ui_state: ResMut<'w, UIState>,
-    camera_focus: ResMut<'w, CameraFocusState>,
-    moon_pos: Res<'w, MoonEcefKm>,
-    dut1: Res<'w, Dut1>,
-    q_camera: MainCameraQuery<'w, 's>,
+    camera_requests: MessageWriter<'w, CameraRequest>,
     commands: Commands<'w, 's>,
     fetch_channels: Option<Res<'w, FetchChannels>>,
     launch_library_state: ResMut<'w, LaunchLibraryState>,
@@ -653,8 +643,6 @@ impl Plugin for UiSystemsPlugin {
                     update_space_weather_texts,
                     update_launch_library_texts,
                     update_launch_library_popup,
-                    focus_camera_on_launch_selection,
-                    animate_launch_camera_focus,
                     update_text_input_display,
                     update_satellite_list_panel_width,
                 ),
@@ -682,7 +670,8 @@ impl Plugin for UiSystemsPlugin {
                 PostUpdate,
                 enforce_orbitron_text
                     .in_set(UiSystems::Propagate)
-                    .after(PropagateSet::<TextFont>::default()),
+                    .after(PropagateSet::<TextFont>::default())
+                    .before(UiSystems::Content),
             )
             // Camera + viewport must be finalized after UI layout so sizes are up-to-date,
             // and late enough that no later system overwrites our settings before extraction.
@@ -694,11 +683,8 @@ impl Plugin for UiSystemsPlugin {
             )
             .add_systems(
                 PostUpdate,
-                update_camera_input_from_ui_hover.before(PanOrbitCameraSystemSet),
-            )
-            .add_systems(
-                PostUpdate,
-                lock_camera_focus_to_target.after(PanOrbitCameraSystemSet),
+                sync_ui_display_visibility
+                    .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
             )
             .add_observer(checkbox_self_update)
             .add_observer(slider_self_update)
@@ -742,75 +728,6 @@ fn enforce_ui_camera_settings(mut cameras: UiCameraQuery<'_, '_>) {
             camera.clear_color = ClearColorConfig::None;
         }
     }
-}
-
-fn lock_camera_focus_to_target(
-    camera_focus: Res<CameraFocusState>,
-    moon_pos: Res<MoonEcefKm>,
-    sim_time: Res<SimulationTime>,
-    dut1: Res<Dut1>,
-    mut moon_cam: ResMut<MoonCameraState>,
-    q_moon: Query<&Transform, (With<Moon>, Without<MainCamera>)>,
-    mut q_camera: MainCameraQuery<'_, '_>,
-) {
-    let Ok((mut poc, mut transform)) = q_camera.single_mut() else {
-        return;
-    };
-
-    let focus = match camera_focus.target {
-        CameraFocusTarget::Earth => Vec3::ZERO,
-        CameraFocusTarget::Moon => resolve_moon_focus(&sim_time, &dut1, &moon_pos),
-    };
-
-    poc.focus = focus;
-    let radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
-    let pitch = poc.pitch.unwrap_or(poc.target_pitch);
-    let yaw = poc.yaw.unwrap_or(poc.target_yaw);
-
-    // For the Moon we keep the camera fixed to a direction in Moon-local space so that
-    // the same surface feature stays under the camera as the Moon orbits Earth.
-    if camera_focus.target == CameraFocusTarget::Moon
-        && let Ok(moon_transform) = q_moon.single()
-    {
-        let moon_rot = moon_transform.rotation;
-
-        // Detect user camera movement (PanOrbitCamera changed pitch/yaw this frame).
-        let user_moved =
-            (yaw - moon_cam.last_yaw).abs() > 1e-6 || (pitch - moon_cam.last_pitch).abs() > 1e-6;
-
-        if user_moved || moon_cam.local_offset.is_none() {
-            // User moved the camera (or first init): record the current world-space
-            // direction in Moon's local frame so we can replay it next frame.
-            let world_dir = Vec3::new(
-                pitch.cos() * yaw.sin(),
-                pitch.sin(),
-                pitch.cos() * yaw.cos(),
-            )
-            .normalize_or_zero();
-            moon_cam.local_offset = Some(moon_rot.inverse() * world_dir);
-        }
-
-        // Reconstruct the world-space camera direction from the stored local offset,
-        // using the Moon's *current* rotation.  This cancels the tidal-lock spin.
-        let local_dir = moon_cam.local_offset.unwrap_or(Vec3::Z);
-        let world_dir = (moon_rot * local_dir).normalize_or_zero();
-
-        let camera_pos = focus + world_dir * radius;
-        transform.translation = camera_pos;
-        transform.look_at(focus, Vec3::Y);
-
-        moon_cam.last_yaw = yaw;
-        moon_cam.last_pitch = pitch;
-        return;
-    }
-
-    let camera_pos = Vec3::new(
-        radius * pitch.cos() * yaw.sin(),
-        radius * pitch.sin(),
-        radius * pitch.cos() * yaw.cos(),
-    ) + focus;
-    transform.translation = camera_pos;
-    transform.look_at(focus, Vec3::Y);
 }
 
 fn setup_ui_camera(mut commands: Commands) {
@@ -870,6 +787,7 @@ fn setup_ui(
                 ..default()
             },
             Pickable::IGNORE,
+            TabGroup::new(0),
             // Provide a default font + text color for all `ThemedText` descendants.
             InheritableFont {
                 font: ui_font.medium.clone(),
@@ -905,6 +823,8 @@ fn setup_ui(
             RelativeCursorPosition::default(),
             Pickable::IGNORE,
             LeftPanel,
+            UiDisplayVisibility,
+            CameraInputBlocker,
         ))
         .id();
 
@@ -932,6 +852,8 @@ fn setup_ui(
             RelativeCursorPosition::default(),
             Pickable::IGNORE,
             RightPanel,
+            UiDisplayVisibility,
+            CameraInputBlocker,
         ))
         .id();
 
@@ -960,6 +882,8 @@ fn setup_ui(
             RelativeCursorPosition::default(),
             Pickable::IGNORE,
             TopPanel,
+            UiDisplayVisibility,
+            CameraInputBlocker,
         ))
         .id();
 
@@ -987,6 +911,8 @@ fn setup_ui(
             RelativeCursorPosition::default(),
             Pickable::IGNORE,
             BottomPanel,
+            UiDisplayVisibility,
+            CameraInputBlocker,
         ))
         .id();
 
@@ -1012,6 +938,8 @@ fn setup_ui(
                 Pickable::IGNORE,
                 ThemedText,
                 LaunchLibraryPopupOverlay,
+                UiDisplayVisibility,
+                CameraInputBlocker,
             ))
             .with_children(|overlay| {
                 overlay
@@ -1677,6 +1605,7 @@ fn setup_ui(
                                 },
                                 ThemedText,
                                 GroupColorPickerHost,
+                                UiDisplayVisibility,
                             ));
 
                             spawn_feathers_button(
@@ -2351,6 +2280,7 @@ fn spawn_tooltip_bubble(parent: &mut ChildSpawnerCommands, text: &str) -> Entity
             Pickable::IGNORE,
             ThemedText,
             TooltipBubble,
+            UiDisplayVisibility,
         ))
         .with_children(|bubble| {
             bubble.spawn((
@@ -2384,6 +2314,7 @@ fn spawn_tooltip_bubble_absolute(parent: &mut ChildSpawnerCommands, text: &str) 
             Pickable::IGNORE,
             ThemedText,
             TooltipBubble,
+            UiDisplayVisibility,
         ))
         .with_children(|bubble| {
             bubble.spawn((
@@ -2883,7 +2814,7 @@ fn spawn_section(
             }
 
             body_entity = section
-                .spawn((body_node, Pickable::IGNORE, ThemedText))
+                .spawn((body_node, Pickable::IGNORE, ThemedText, UiDisplayVisibility))
                 .with_children(|body| {
                     body.spawn((
                         Node {
@@ -3344,40 +3275,6 @@ fn update_camera_viewport_from_ui(
     });
 }
 
-fn update_camera_input_from_ui_hover(
-    ui_entities: Res<UiEntities>,
-    state: Res<UIState>,
-    panels: Query<&RelativeCursorPosition>,
-    mut cameras: Query<&mut PanOrbitCamera, With<MainCamera>>,
-) {
-    let mut hovered = false;
-
-    if state.show_left_panel
-        && let Ok(pos) = panels.get(ui_entities.left_panel)
-    {
-        hovered |= pos.cursor_over;
-    }
-    if state.show_right_panel
-        && let Ok(pos) = panels.get(ui_entities.right_panel)
-    {
-        hovered |= pos.cursor_over;
-    }
-    if state.show_top_panel
-        && let Ok(pos) = panels.get(ui_entities.top_panel)
-    {
-        hovered |= pos.cursor_over;
-    }
-    if state.show_bottom_panel
-        && let Ok(pos) = panels.get(ui_entities.bottom_panel)
-    {
-        hovered |= pos.cursor_over;
-    }
-
-    for mut pan_orbit in &mut cameras {
-        pan_orbit.enabled = !hovered;
-    }
-}
-
 #[allow(clippy::type_complexity)]
 fn update_time_display(
     mut texts: ParamSet<(
@@ -3693,124 +3590,6 @@ fn update_launch_library_popup(
 
     for mut text in &mut texts.p1() {
         text.0 = body.clone();
-    }
-}
-
-fn focus_camera_on_launch_selection(
-    mut launch_ui: ResMut<LaunchLibraryUiState>,
-    data: Res<LaunchLibraryData>,
-    mut camera_focus: ResMut<CameraFocusState>,
-    mut selected: ResMut<SelectedSatellite>,
-    mut q_camera: MainCameraQuery<'_, '_>,
-) {
-    if !launch_ui.is_changed() {
-        return;
-    }
-
-    let Some(selection) = launch_ui.selection else {
-        return;
-    };
-
-    if selection.kind != LaunchLibraryItemKind::Launch {
-        return;
-    }
-
-    let Some(launch) = data.launches.get(selection.index) else {
-        return;
-    };
-
-    let (Some(lat), Some(lon)) = (launch.pad_lat, launch.pad_lon) else {
-        return;
-    };
-
-    let Ok(coords) = Coordinates::from_degrees(lat as f32, lon as f32) else {
-        return;
-    };
-    let ecef = coords.get_point_on_sphere_ecef_km_dvec();
-    let bevy_pos = ecef_to_bevy_km(ecef);
-    let mut dir = bevy_pos.normalize_or_zero();
-    if dir.length_squared() < 1e-6 {
-        dir = Vec3::Z;
-    }
-
-    if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-        selected.tracking = None;
-        selected.selected = None;
-        camera_focus.target = CameraFocusTarget::Earth;
-
-        let current_radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
-        let target_radius = current_radius.min(9_000.0);
-        let pitch = dir.y.asin();
-        let yaw = dir.x.atan2(dir.z);
-        let pose = CameraPose {
-            radius: target_radius,
-            yaw,
-            pitch,
-        };
-        launch_ui.camera_target = Some(pose);
-        poc.target_radius = target_radius;
-        poc.target_pitch = pitch;
-        poc.target_yaw = yaw;
-        poc.focus = Vec3::ZERO;
-        poc.force_update = true;
-        cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-    }
-}
-
-fn animate_launch_camera_focus(
-    time: Res<Time>,
-    mut launch_ui: ResMut<LaunchLibraryUiState>,
-    mut q_camera: MainCameraQuery<'_, '_>,
-) {
-    let Some(target) = launch_ui.camera_target else {
-        return;
-    };
-
-    let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() else {
-        return;
-    };
-
-    let dt = time.delta_secs();
-    let smooth_factor = 0.12_f32;
-    let lerp = 1.0_f32 - (1.0_f32 - smooth_factor).powf(dt * 60.0);
-
-    let mut radius = poc.radius.unwrap_or(poc.target_radius).max(1.0);
-    let mut pitch = poc.pitch.unwrap_or(poc.target_pitch);
-    let mut yaw = poc.yaw.unwrap_or(poc.target_yaw);
-
-    let mut yaw_diff = target.yaw - yaw;
-    if yaw_diff > std::f32::consts::PI {
-        yaw_diff -= 2.0 * std::f32::consts::PI;
-    } else if yaw_diff < -std::f32::consts::PI {
-        yaw_diff += 2.0 * std::f32::consts::PI;
-    }
-
-    radius += (target.radius - radius) * lerp;
-    pitch += (target.pitch - pitch) * lerp;
-    yaw += yaw_diff * lerp;
-
-    poc.radius = Some(radius);
-    poc.pitch = Some(pitch);
-    poc.yaw = Some(yaw);
-    poc.focus = Vec3::ZERO;
-    poc.target_radius = target.radius;
-    poc.target_pitch = target.pitch;
-    poc.target_yaw = target.yaw;
-    poc.force_update = true;
-
-    let camera_pos = Vec3::new(
-        radius * pitch.cos() * yaw.sin(),
-        radius * pitch.sin(),
-        radius * pitch.cos() * yaw.cos(),
-    );
-    cam_transform.translation = camera_pos;
-    cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-
-    let done = (radius - target.radius).abs() < 5.0
-        && (pitch - target.pitch).abs() < 0.002
-        && (yaw - target.yaw).abs() < 0.002;
-    if done {
-        launch_ui.camera_target = None;
     }
 }
 
@@ -4707,42 +4486,6 @@ fn sync_slider_visuals(
     }
 }
 
-fn pose_from_camera(camera_pos: Vec3, focus: Vec3) -> CameraPose {
-    let delta = camera_pos - focus;
-    let radius = delta.length().max(1.0);
-    let dir = delta / radius;
-    let pitch = dir.y.asin();
-    let yaw = dir.x.atan2(dir.z);
-    CameraPose { radius, yaw, pitch }
-}
-
-fn apply_pose(poc: &mut PanOrbitCamera, transform: &mut Transform, focus: Vec3, pose: CameraPose) {
-    poc.focus = focus;
-    poc.target_radius = pose.radius;
-    poc.target_pitch = pose.pitch;
-    poc.target_yaw = pose.yaw;
-    poc.radius = Some(pose.radius);
-    poc.pitch = Some(pose.pitch);
-    poc.yaw = Some(pose.yaw);
-    poc.force_update = true;
-
-    let camera_pos = Vec3::new(
-        pose.radius * pose.pitch.cos() * pose.yaw.sin(),
-        pose.radius * pose.pitch.sin(),
-        pose.radius * pose.pitch.cos() * pose.yaw.cos(),
-    ) + focus;
-    transform.translation = camera_pos;
-    transform.look_at(focus, Vec3::Y);
-}
-
-fn resolve_moon_focus(sim_time: &SimulationTime, dut1: &Dut1, moon_pos: &MoonEcefKm) -> Vec3 {
-    if moon_pos.0.length_squared() > 0.0 {
-        ecef_to_bevy_km(moon_pos.0)
-    } else {
-        ecef_to_bevy_km(moon_position_ecef_km(sim_time.current_utc, **dut1))
-    }
-}
-
 fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_, '_>) {
     if let Ok(item) = params.q_launch_item.get(ev.entity) {
         params.launch_ui.selection = Some(LaunchLibrarySelection {
@@ -4796,41 +4539,7 @@ fn handle_button_activate(ev: On<Activate>, mut params: ButtonActivateParams<'_,
                 params.sim_time.time_scale = 1.0;
             }
             ButtonAction::ToggleFocusTarget => {
-                if let Ok((mut poc, mut cam_transform)) = params.q_camera.single_mut() {
-                    let current_pos = cam_transform.translation;
-                    match params.camera_focus.target {
-                        CameraFocusTarget::Earth => {
-                            params.selected.tracking = None;
-                            params.camera_focus.last_earth_pose =
-                                Some(pose_from_camera(current_pos, Vec3::ZERO));
-
-                            let moon_focus = resolve_moon_focus(
-                                &params.sim_time,
-                                &params.dut1,
-                                &params.moon_pos,
-                            );
-                            let moon_dir = moon_focus.normalize_or_zero();
-                            let focus_dir = if moon_dir.length_squared() > 0.0 {
-                                moon_dir
-                            } else {
-                                Vec3::Z
-                            };
-                            let camera_pos = moon_focus + focus_dir * MOON_FOCUS_DISTANCE_KM;
-                            let pose = pose_from_camera(camera_pos, moon_focus);
-                            apply_pose(&mut poc, &mut cam_transform, moon_focus, pose);
-                            params.camera_focus.target = CameraFocusTarget::Moon;
-                        }
-                        CameraFocusTarget::Moon => {
-                            let pose = params.camera_focus.last_earth_pose.unwrap_or(CameraPose {
-                                radius: 25_000.0,
-                                yaw: 0.0,
-                                pitch: 0.0,
-                            });
-                            apply_pose(&mut poc, &mut cam_transform, Vec3::ZERO, pose);
-                            params.camera_focus.target = CameraFocusTarget::Earth;
-                        }
-                    }
-                }
+                params.camera_requests.write(CameraRequest::ToggleFocus);
             }
             ButtonAction::RefreshLaunchLibrary => {
                 params.launch_library_state.force_refresh = true;
@@ -5058,7 +4767,7 @@ fn handle_group_choice(
 }
 
 fn handle_group_swatch_click(
-    ev: On<Pointer<Click>>,
+    ev: On<PointerClick>,
     q_swatches: Query<&GroupColorSwatch>,
     mut right_ui: ResMut<RightPanelUI>,
 ) {
@@ -5085,8 +4794,7 @@ fn handle_group_color_plane_change(
         return;
     };
 
-    let red = ev.value.x.clamp(0.0, 1.0);
-    let blue = ev.value.y.clamp(0.0, 1.0);
+    let (red, blue) = color_plane_channels(ev.value);
     let green = plane_value.0.z.clamp(0.0, 1.0);
     let color = Color::srgba(red, green, blue, 1.0);
     plane_value.0.x = red;
@@ -5158,7 +4866,7 @@ fn handle_group_color_green_change(
 }
 
 fn text_input_on_click(
-    ev: On<Pointer<Click>>,
+    ev: On<PointerClick>,
     q_input: Query<(), With<TextInputField>>,
     focus: Option<ResMut<InputFocus>>,
     focus_visible: Option<ResMut<InputFocusVisible>>,
@@ -5175,7 +4883,7 @@ fn text_input_on_click(
 
 #[allow(clippy::type_complexity)]
 fn handle_tooltip_toggle_click(
-    ev: On<Pointer<Click>>,
+    ev: On<PointerClick>,
     toggles: Query<&TooltipToggle>,
     mut bubbles: ParamSet<(
         Query<&Node, With<TooltipBubble>>,
@@ -5247,7 +4955,7 @@ fn text_input_on_key_input(
 }
 
 fn handle_right_panel_resize_start(
-    ev: On<Pointer<DragStart>>,
+    ev: On<PointerDragStart>,
     q_handle: Query<(), With<RightPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5260,7 +4968,7 @@ fn handle_right_panel_resize_start(
 }
 
 fn handle_right_panel_resize_drag(
-    ev: On<Pointer<Drag>>,
+    ev: On<PointerDrag>,
     q_handle: Query<(), With<RightPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5275,7 +4983,7 @@ fn handle_right_panel_resize_drag(
 }
 
 fn handle_right_panel_resize_end(
-    ev: On<Pointer<DragEnd>>,
+    ev: On<PointerDragEnd>,
     q_handle: Query<(), With<RightPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5287,7 +4995,7 @@ fn handle_right_panel_resize_end(
 }
 
 fn handle_left_panel_resize_start(
-    ev: On<Pointer<DragStart>>,
+    ev: On<PointerDragStart>,
     q_handle: Query<(), With<LeftPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5300,7 +5008,7 @@ fn handle_left_panel_resize_start(
 }
 
 fn handle_left_panel_resize_drag(
-    ev: On<Pointer<Drag>>,
+    ev: On<PointerDrag>,
     q_handle: Query<(), With<LeftPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5315,7 +5023,7 @@ fn handle_left_panel_resize_drag(
 }
 
 fn handle_left_panel_resize_end(
-    ev: On<Pointer<DragEnd>>,
+    ev: On<PointerDragEnd>,
     q_handle: Query<(), With<LeftPanelResizeHandle>>,
     mut layout: ResMut<UiLayoutState>,
 ) {
@@ -5546,5 +5254,74 @@ fn update_group_list_visuals(
             text.0.clear();
             color.0 = Color::srgba(0.55, 0.65, 0.75, 0.75);
         }
+    }
+}
+
+fn color_plane_channels(value: Vec2) -> (f32, f32) {
+    (value.x.clamp(0.0, 1.0), value.y.clamp(0.0, 1.0))
+}
+
+// Tab navigation follows InheritedVisibility, rather than Node::display. Keep
+// both in sync for the application's panels, collapsed sections and popups.
+#[allow(clippy::type_complexity)]
+fn sync_ui_display_visibility(
+    mut nodes: Query<(&Node, &mut Visibility), (With<UiDisplayVisibility>, Changed<Node>)>,
+) {
+    for (node, mut visibility) in &mut nodes {
+        let target = if node.display == Display::None {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *visibility != target {
+            *visibility = target;
+        }
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn display_visibility_tracks_app_sections_without_overriding_widgets() {
+        let mut app = App::new();
+        app.add_systems(Update, sync_ui_display_visibility);
+        let section = app
+            .world_mut()
+            .spawn((
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+                UiDisplayVisibility,
+            ))
+            .id();
+        let widget = app
+            .world_mut()
+            .spawn((Node::default(), Visibility::Hidden))
+            .id();
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(section).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(widget).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut().get_mut::<Node>(section).unwrap().display = Display::Flex;
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(section).unwrap(),
+            Visibility::Inherited
+        );
+    }
+
+    #[test]
+    fn color_plane_retains_upward_increasing_blue_channel() {
+        assert_eq!(color_plane_channels(Vec2::new(0.25, 1.0)), (0.25, 1.0));
+        assert_eq!(color_plane_channels(Vec2::new(0.25, 0.0)), (0.25, 0.0));
+        assert_eq!(color_plane_channels(Vec2::new(-1.0, 2.0)), (0.0, 1.0));
     }
 }

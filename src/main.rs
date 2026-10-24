@@ -1,10 +1,10 @@
-use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
+use bevy::render::view::Tonemapping;
 use bevy::window::{PresentMode, Window, WindowPlugin};
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use camera::{CameraPlugin, orbit_controller};
 
 #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 use bevy::camera::Hdr;
@@ -17,7 +17,7 @@ use bevy::dev_tools::fps_overlay::FpsOverlayPlugin;
     ),
     all(feature = "debug_basic_scene", feature = "debug_scene_camera")
 ))]
-use bevy::feathers::{FeathersPlugins, dark_theme::create_dark_theme, palette, theme::UiTheme};
+use bevy::feathers::FeathersPlugins;
 #[cfg(any(
     all(
         not(feature = "debug_basic_scene"),
@@ -56,8 +56,9 @@ use bevy::post_process::bloom::Bloom;
         all(feature = "debug_basic_scene", feature = "debug_scene_camera")
     )
 ))]
-use bevy_camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+use bevy_camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 
+mod camera;
 mod core;
 mod launch_library;
 mod orbital;
@@ -175,14 +176,7 @@ pub fn setup(
     // Configure PanOrbitCamera for our scene scale (Earth radius = 6371 km)
     let initial_distance = 25000.0; // ~4x Earth's radius
 
-    let pan_orbit = PanOrbitCamera {
-        focus: Vec3::ZERO,              // Look at Earth's center
-        radius: Some(initial_distance), // Initial distance from focus point
-        yaw: Some(0.0),                 // Initial yaw angle
-        pitch: Some(0.0),               // Initial pitch angle
-        force_update: true,             // Force immediate positioning
-        ..default()
-    };
+    let pan_orbit = orbit_controller(initial_distance);
 
     commands.spawn((
         Camera3d::default(),
@@ -281,7 +275,12 @@ struct DebugSceneCamera {
 }
 
 #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
+#[derive(Component)]
+struct DiagnosticSky;
+
+#[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
 fn setup_debug_scene_camera(
+    mut sky_materials: ResMut<Assets<visualization::sky_material::SkyMaterial>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -319,13 +318,25 @@ fn setup_debug_scene_camera(
             Hdr,
             Bloom::NATURAL,
             Tonemapping::TonyMcMapface,
-            PanOrbitCamera::default(),
+            orbit_controller(25_000.0),
             MainCamera,
             Transform::from_xyz(25_000.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
             Name::new("Debug Camera"),
         ))
         .id();
 
+    // A separate cubemap sphere forces WESL compilation in this diagnostic.
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(900_000.0).mesh().uv(32, 16))),
+        MeshMaterial3d(sky_materials.add(visualization::sky_material::SkyMaterial {
+            texture: skybox_handle.clone(),
+        })),
+        Transform::default(),
+        bevy::picking::Pickable::IGNORE,
+        Name::new("Custom SkyMaterial diagnostic"),
+        Visibility::Hidden,
+        DiagnosticSky,
+    ));
     commands.insert_resource(DebugSceneCamera { entity: camera });
     commands.insert_resource(SimulationTime::default());
     commands.insert_resource(Dut1::default());
@@ -343,7 +354,18 @@ fn toggle_debug_scene_components(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     q_camera: Query<Option<&Skybox>, With<Camera3d>>,
+    mut custom_sky: Query<&mut Visibility, With<DiagnosticSky>>,
 ) {
+    if input.just_pressed(KeyCode::Digit2) {
+        for mut visibility in &mut custom_sky {
+            *visibility = if *visibility == Visibility::Hidden {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
+        info!("Debug scene: toggled custom WESL sky (press 2)");
+    }
     let Ok(skybox) = q_camera.get(cam.entity) else {
         return;
     };
@@ -374,6 +396,8 @@ fn toggle_debug_scene_components(
     )
 ))]
 fn setup_dev_camera(mut commands: Commands) {
+    let mut state = FreeCameraState::default();
+    state.enabled = false;
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
@@ -387,6 +411,7 @@ fn setup_dev_camera(mut commands: Commands) {
             ..default()
         },
         FreeCamera::default(),
+        state,
         DevCamera,
     ));
 }
@@ -401,21 +426,35 @@ fn setup_dev_camera(mut commands: Commands) {
         all(feature = "debug_basic_scene", feature = "debug_scene_camera")
     )
 ))]
+#[allow(clippy::type_complexity)]
 fn toggle_dev_camera(
     input: Res<ButtonInput<KeyCode>>,
-    mut main_camera: Query<&mut Camera, (With<MainCamera>, Without<DevCamera>)>,
-    mut dev_camera: Query<&mut Camera, With<DevCamera>>,
+    mut main_camera: Query<(&mut Camera, &Transform), (With<MainCamera>, Without<DevCamera>)>,
+    mut dev_camera: Query<(&mut Camera, &mut Transform, &mut FreeCameraState), With<DevCamera>>,
 ) {
     if !input.just_pressed(KeyCode::F2) {
         return;
     }
 
-    if let Ok(mut main) = main_camera.single_mut()
-        && let Ok(mut dev) = dev_camera.single_mut()
+    if let Ok((mut main, main_transform)) = main_camera.single_mut()
+        && let Ok((mut dev, mut transform, mut state)) = dev_camera.single_mut()
     {
         let dev_active = dev.is_active;
+        if !dev_active {
+            *transform = *main_transform;
+            let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+            state.yaw = yaw;
+            state.pitch = pitch;
+        }
+        state.velocity = Vec3::ZERO;
+        state.rotation_curve = None;
+        state.enabled = !dev_active;
         dev.is_active = !dev_active;
         main.is_active = dev_active;
+        info!(
+            "Development camera {} (F2)",
+            if dev.is_active { "ON" } else { "OFF" }
+        );
     }
 }
 
@@ -452,66 +491,7 @@ fn main() {
         all(feature = "debug_basic_scene", feature = "debug_scene_camera")
     ))]
     {
-        // Feathers initializes `UiTheme` but does not populate it by default.
-        // If we don't set this, many widgets will render with the "missing token" fallback color.
-        let mut theme = UiTheme(create_dark_theme());
-        theme.set_color("feathers.text.main", palette::LIGHT_GRAY_1);
-        theme.set_color("feathers.text.dim", palette::LIGHT_GRAY_2);
-        theme.set_color("feathers.focus", palette::ACCENT);
-        theme.set_color("feathers.slider.bg", Color::srgba(0.04, 0.08, 0.12, 0.9));
-        theme.set_color("feathers.slider.bar", Color::srgba(0.18, 0.7, 0.8, 0.7));
-        theme.set_color(
-            "feathers.slider.bar.disabled",
-            Color::srgba(0.1, 0.3, 0.35, 0.45),
-        );
-        theme.set_color("feathers.slider.text", Color::srgba(0.5, 0.9, 0.95, 0.95));
-        theme.set_color(
-            "feathers.slider.text.disabled",
-            Color::srgba(0.4, 0.55, 0.6, 0.7),
-        );
-        theme.set_color("feathers.button.bg", Color::srgba(0.06, 0.12, 0.16, 0.9));
-        theme.set_color(
-            "feathers.button.bg.hover",
-            Color::srgba(0.08, 0.2, 0.26, 0.95),
-        );
-        theme.set_color(
-            "feathers.button.bg.pressed",
-            Color::srgba(0.1, 0.26, 0.32, 0.95),
-        );
-        theme.set_color(
-            "feathers.button.bg.disabled",
-            Color::srgba(0.08, 0.12, 0.15, 0.5),
-        );
-        theme.set_color("feathers.button.txt", Color::srgba(0.6, 1.0, 1.0, 1.0));
-        theme.set_color(
-            "feathers.button.txt.disabled",
-            Color::srgba(0.45, 0.6, 0.65, 0.7),
-        );
-        theme.set_color(
-            "feathers.button.primary.bg",
-            Color::srgba(0.08, 0.22, 0.28, 0.95),
-        );
-        theme.set_color(
-            "feathers.button.primary.bg.hover",
-            Color::srgba(0.1, 0.28, 0.36, 0.98),
-        );
-        theme.set_color(
-            "feathers.button.primary.bg.pressed",
-            Color::srgba(0.12, 0.32, 0.4, 0.98),
-        );
-        theme.set_color(
-            "feathers.button.primary.bg.disabled",
-            Color::srgba(0.08, 0.16, 0.2, 0.6),
-        );
-        theme.set_color(
-            "feathers.button.primary.txt",
-            Color::srgba(0.7, 1.0, 1.0, 1.0),
-        );
-        theme.set_color(
-            "feathers.button.primary.txt.disabled",
-            Color::srgba(0.45, 0.6, 0.65, 0.7),
-        );
-        app.insert_resource(theme);
+        app.insert_resource(ui::theme::app_theme());
 
         app.add_plugins(FeathersPlugins);
         app.add_plugins(DirectionalNavigationPlugin);
@@ -519,7 +499,7 @@ fn main() {
         #[cfg(feature = "dev_camera")]
         app.add_plugins(FreeCameraPlugin);
 
-        app.add_plugins(PanOrbitCameraPlugin);
+        app.add_plugins(CameraPlugin);
         app.add_plugins(MeshPickingPlugin);
 
         // Add our custom plugins
@@ -548,7 +528,9 @@ fn main() {
 
     #[cfg(all(feature = "debug_scene_camera", not(feature = "debug_basic_scene")))]
     {
-        app.add_plugins(PanOrbitCameraPlugin);
+        app.add_plugins(CameraPlugin);
+        app.add_plugins(bevy::picking::prelude::MeshPickingPlugin);
+        app.add_plugins(visualization::SkyMaterialPlugin);
         app.add_plugins(SkyboxPlugin);
         app.add_systems(Startup, setup_debug_scene_camera);
         app.add_systems(Update, toggle_debug_scene_components);
@@ -570,4 +552,64 @@ fn main() {
     }
 
     app.run();
+}
+
+#[cfg(all(
+    test,
+    feature = "dev_camera",
+    any(
+        all(
+            not(feature = "debug_basic_scene"),
+            not(feature = "debug_scene_camera")
+        ),
+        all(feature = "debug_basic_scene", feature = "debug_scene_camera")
+    )
+))]
+mod dev_camera_tests {
+    use super::*;
+
+    #[test]
+    fn f2_copies_pose_and_disables_inactive_free_camera_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, toggle_dev_camera);
+        let pose = Transform::from_xyz(4_000.0, 2_000.0, 25_000.0).looking_at(Vec3::ZERO, Vec3::Y);
+        let main = app
+            .world_mut()
+            .spawn((MainCamera, Camera::default(), pose))
+            .id();
+        let mut state = FreeCameraState::default();
+        state.enabled = false;
+        let dev = app
+            .world_mut()
+            .spawn((
+                DevCamera,
+                Camera {
+                    is_active: false,
+                    ..default()
+                },
+                Transform::default(),
+                state,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F2);
+        app.update();
+        assert!(!app.world().get::<Camera>(main).unwrap().is_active);
+        assert!(app.world().get::<Camera>(dev).unwrap().is_active);
+        assert!(app.world().get::<FreeCameraState>(dev).unwrap().enabled);
+        assert_eq!(*app.world().get::<Transform>(dev).unwrap(), pose);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F2);
+        app.update();
+        assert!(app.world().get::<Camera>(main).unwrap().is_active);
+        assert!(!app.world().get::<Camera>(dev).unwrap().is_active);
+        assert!(!app.world().get::<FreeCameraState>(dev).unwrap().enabled);
+    }
 }

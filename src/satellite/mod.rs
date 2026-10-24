@@ -16,9 +16,8 @@ pub use resources::{
 };
 pub use systems::{
     draw_orbit_trails_system, init_satellite_render_assets, materialize_satellite_entities_system,
-    move_camera_to_satellite, propagate_satellites_system, satellite_click_system,
-    track_satellite_continuously, update_group_colors_system, update_orbit_trails_system,
-    update_satellite_rendering_system,
+    propagate_satellites_system, satellite_click_system, update_group_colors_system,
+    update_orbit_trails_system, update_satellite_rendering_system,
 };
 
 /// Plugin for satellite management and propagation
@@ -45,8 +44,6 @@ impl Plugin for SatellitePlugin {
                     draw_orbit_trails_system.after(update_orbit_trails_system),
                     update_satellite_rendering_system,
                     update_group_colors_system,
-                    move_camera_to_satellite,
-                    track_satellite_continuously.after(propagate_satellites_system),
                     satellite_click_system,
                 ),
             );

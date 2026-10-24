@@ -67,7 +67,7 @@ pub fn generate_unified_earth(
             Visibility::Visible,
             Name::new("Earth"),
         ))
-        .observe(|mut event: On<Pointer<Click>>| {
+        .observe(|mut event: On<PointerClick>| {
             let hit = &event.hit;
             if let Some(pos) = hit.position {
                 let coords: Coordinates = pos.into();
