@@ -9,22 +9,11 @@ use crate::satellite::components::{
     NoradId, OrbitTrail, Propagator, Satellite, SatelliteColor, SatelliteFlags, SatelliteGroupUrl,
     SatelliteName, TleComponent, TrailPoint,
 };
-use crate::satellite::resources::{
-    GroupMaterialCache, GroupRegistry, NoradIndex, SatelliteRenderAssets, SelectedSatellite,
-};
+use crate::satellite::resources::{GroupMaterialCache, GroupRegistry, SatelliteRenderAssets};
 use bevy::color::LinearRgba;
 use bevy::math::DVec3;
-use bevy::picking::events::Click;
-use bevy::picking::events::Pointer;
+use bevy::picking::events::PointerClick;
 use bevy::prelude::*;
-use bevy_panorbit_camera::PanOrbitCamera;
-
-type CameraQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut PanOrbitCamera, &'static mut Transform),
-    (With<Camera3d>, Without<Satellite>),
->;
 
 type PropagateQuery<'w, 's> = Query<
     'w,
@@ -226,150 +215,9 @@ pub fn draw_orbit_trails_system(
     }
 }
 
-/// System to move camera to selected satellite with offset
-pub fn move_camera_to_satellite(
-    mut selected: ResMut<SelectedSatellite>,
-    norad_index: Res<NoradIndex>,
-    mut q_camera: CameraQuery<'_, '_>,
-    q_sat: Query<&Transform, With<Satellite>>,
-) {
-    if let Some(norad) = selected.selected.take() {
-        if let Some(&entity) = norad_index.map.get(&norad) {
-            if let Ok(sat_transform) = q_sat.get(entity) {
-                let sat_pos = sat_transform.translation;
-
-                let dir = sat_pos.normalize();
-                let offset = 5000.0; // km
-                let new_pos = dir * (sat_pos.length() + offset);
-                let new_radius = new_pos.length();
-
-                // Compute pitch and yaw from direction
-                let direction = new_pos.normalize();
-                let pitch = direction.y.asin();
-                let yaw = direction.x.atan2(direction.z);
-
-                if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-                    // Force immediate camera position without smooth transition
-                    poc.focus = Vec3::ZERO;
-
-                    // Set target values first
-                    poc.target_radius = new_radius;
-                    poc.target_pitch = pitch;
-                    poc.target_yaw = yaw;
-
-                    // Force immediate update by setting current values too
-                    poc.radius = Some(new_radius);
-                    poc.pitch = Some(pitch);
-                    poc.yaw = Some(yaw);
-
-                    // Force immediate update
-                    poc.force_update = true;
-
-                    // Also directly update the camera transform as a backup
-                    let camera_pos = Vec3::new(
-                        new_radius * pitch.cos() * yaw.sin(),
-                        new_radius * pitch.sin(),
-                        new_radius * pitch.cos() * yaw.cos(),
-                    );
-                    cam_transform.translation = camera_pos;
-                    cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-                } else {
-                    println!("[CAMERA] Failed to get camera");
-                }
-            } else {
-                println!("[CAMERA] Failed to get satellite transform");
-            }
-        } else {
-            println!("[CAMERA] No satellite found for norad={norad}");
-        }
-        // Clear selection after processing
-        selected.selected = None;
-    }
-}
-
-/// System to continuously track a satellite with the camera
-pub fn track_satellite_continuously(
-    tracking: Res<SelectedSatellite>,
-    norad_index: Res<NoradIndex>,
-    mut q_camera: CameraQuery<'_, '_>,
-    q_sat: Query<&Transform, With<Satellite>>,
-    time: Res<Time>,
-) {
-    // Only track if we have a tracking target
-    if let Some(tracking_norad) = tracking.tracking
-        && let Some(&entity) = norad_index.map.get(&tracking_norad)
-        && let Ok(sat_transform) = q_sat.get(entity)
-    {
-        let sat_pos = sat_transform.translation;
-
-        // Calculate desired camera position with offset
-        let dir = sat_pos.normalize();
-        let offset = tracking.tracking_offset;
-        let target_pos = dir * (sat_pos.length() + offset);
-        let target_radius = target_pos.length();
-
-        // Compute pitch and yaw from direction
-        let direction = target_pos.normalize();
-        let target_pitch = direction.y.asin();
-        let target_yaw = direction.x.atan2(direction.z);
-
-        if let Ok((mut poc, mut cam_transform)) = q_camera.single_mut() {
-            // Smoothly interpolate to target position
-            let smooth_factor = tracking.smooth_factor;
-            let dt = time.delta_secs();
-            let lerp_factor = 1.0 - (1.0 - smooth_factor).powf(dt * 60.0); // 60fps normalized
-
-            // Update PanOrbitCamera targets
-            poc.target_radius = target_radius;
-            poc.target_pitch = target_pitch;
-            poc.target_yaw = target_yaw;
-            poc.focus = Vec3::ZERO;
-
-            // Smoothly update current values if they exist
-            if let Some(current_radius) = poc.radius {
-                poc.radius = Some(current_radius + (target_radius - current_radius) * lerp_factor);
-            } else {
-                poc.radius = Some(target_radius);
-            }
-
-            if let Some(current_pitch) = poc.pitch {
-                poc.pitch = Some(current_pitch + (target_pitch - current_pitch) * lerp_factor);
-            } else {
-                poc.pitch = Some(target_pitch);
-            }
-
-            if let Some(current_yaw) = poc.yaw {
-                // Handle yaw wrapping for shortest path
-                let mut yaw_diff = target_yaw - current_yaw;
-                if yaw_diff > std::f32::consts::PI {
-                    yaw_diff -= 2.0 * std::f32::consts::PI;
-                } else if yaw_diff < -std::f32::consts::PI {
-                    yaw_diff += 2.0 * std::f32::consts::PI;
-                }
-                poc.yaw = Some(current_yaw + yaw_diff * lerp_factor);
-            } else {
-                poc.yaw = Some(target_yaw);
-            }
-
-            // Also update transform directly for immediate visual feedback
-            let current_radius = poc.radius.unwrap_or(target_radius);
-            let current_pitch = poc.pitch.unwrap_or(target_pitch);
-            let current_yaw = poc.yaw.unwrap_or(target_yaw);
-
-            let camera_pos = Vec3::new(
-                current_radius * current_pitch.cos() * current_yaw.sin(),
-                current_radius * current_pitch.sin(),
-                current_radius * current_pitch.cos() * current_yaw.cos(),
-            );
-            cam_transform.translation = camera_pos;
-            cam_transform.look_at(Vec3::ZERO, Vec3::Y);
-        }
-    }
-}
-
 /// System to handle satellite click events and update the clicked satellite in the store
 pub fn satellite_click_system(
-    mut click_events: MessageReader<Pointer<Click>>,
+    mut click_events: MessageReader<PointerClick>,
     norad_query: Query<(&NoradId, Option<&SatelliteName>), With<Satellite>>,
     mut all_satellites: Query<&mut SatelliteFlags, With<Satellite>>,
 ) {

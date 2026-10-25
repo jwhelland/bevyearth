@@ -23,7 +23,7 @@ BevyEarth is a Rust application using the Bevy game engine to create an interact
 - `cargo run --features debug_basic_scene` - Minimal test scene
 - `cargo run --features debug_scene_camera` - Debug scene with controls
 
-**Note**: `debug_basic_scene` and `debug_scene_camera` are mutually exclusive.
+**Note**: enable each diagnostic feature individually. Enabling both selects the full application.
 
 ## Architecture
 
@@ -35,6 +35,7 @@ The application uses Bevy's Entity Component System with specialized plugins:
 - **TlePlugin** - Async TLE data fetching and parsing
 - **OrbitalPlugin** - Orbital mechanics, coordinate transformations, simulation time
 - **UiPlugin** - bevy_feathers-based interface with grouped satellite management
+- **CameraPlugin** - Orbit input, body focus, satellite tracking, and automatic camera movement
 - **VisualizationPlugin** - Axes, arrows, gizmos
 - **CitiesPlugin** - City markers and connectivity visualization
 - **GroundTrackPlugin** / **GroundTrackGizmoPlugin** - Ground track rendering
@@ -63,10 +64,10 @@ The application uses Bevy's Entity Component System with specialized plugins:
 - **Bevy World** - Final rendering coordinates with scaling
 
 ### Major Dependencies
-- **Bevy 0.18.0** - Game engine with experimental feathers UI
-- **bevy_feathers 0.18.0** - Modern UI widgets with dark theme
-- **bevy_panorbit_camera 0.34.0** - 3D camera controls
-- **sgp4 2.3.0** - Satellite orbit propagation
+- **Bevy 0.20.0** - Game engine with experimental Feathers UI (requires Rust 1.97.1)
+- **bevy_feathers 0.20.0** - Modern UI widgets with semantic dark theme
+- **bevy_camera_controller 0.20.0** - Body-centered orbit controls and optional free camera
+- **sgp4 2.4.0** - Satellite orbit propagation
 - **reqwest 0.12** - HTTP TLE fetching with rustls-tls
 - **chrono 0.4** / **tokio 1.0** - Time handling and async runtime
 

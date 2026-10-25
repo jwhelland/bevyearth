@@ -2,20 +2,19 @@
 name = "bevyearth"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97.1"
 # criterion = "0.5"
 
 [features]
-dev = ["bevy/bevy_dev_tools"]
-dev_camera = ["dep:bevy_camera_controller"]
+dev = ["bevy/bevy_dev_tools", "bevy/render_dev_tools"]
+dev_camera = ["bevy_camera_controller/free_camera"]
 debug_basic_scene = []
 debug_scene_camera = []
 
 [dependencies]
 anyhow = "1"
-bevy = { version = "0.19.0", features = ["bevy_feathers", "bevy_ui_widgets"] }
-bevy_camera_controller = { version = "0.19.0", optional = true, features = ["free_camera"] }
-bevy_panorbit_camera = "0.35.0"
+bevy = { version = "0.20.0", features = ["bevy_feathers", "bevy_ui_widgets"] }
+bevy_camera_controller = { version = "0.20.0", features = ["pan_orbit_camera"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 directories = "6"
 # Async HTTP + TLS

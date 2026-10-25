@@ -9,11 +9,10 @@ pub mod groups;
 pub mod skybox;
 pub mod state;
 pub mod systems;
+pub mod theme;
 
 pub use skybox::SkyboxPlugin;
-pub use state::{
-    CameraFocusState, LaunchLibraryUiState, MoonCameraState, RightPanelUI, UIState, UiLayoutState,
-};
+pub use state::{CameraFocusState, LaunchLibraryUiState, RightPanelUI, UIState, UiLayoutState};
 #[allow(unused_imports)]
 pub use systems::MainCamera;
 pub use systems::UiConfigBundle;
@@ -27,7 +26,6 @@ impl Plugin for UiPlugin {
             .init_resource::<UiLayoutState>()
             .init_resource::<RightPanelUI>()
             .init_resource::<CameraFocusState>()
-            .init_resource::<MoonCameraState>()
             .init_resource::<LaunchLibraryUiState>()
             .init_resource::<UiConfigBundle>()
             .add_plugins(systems::UiSystemsPlugin);

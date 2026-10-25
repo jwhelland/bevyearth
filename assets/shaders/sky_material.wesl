@@ -1,8 +1,8 @@
-#import bevy_pbr::mesh_functions
-#import bevy_pbr::view_transformations::position_world_to_clip
+import bevy_pbr::render::mesh_functions;
+import bevy_pbr::render::view_transformations::position_world_to_clip;
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var sky_texture: texture_cube<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var sky_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var sky_texture: texture_cube<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var sky_sampler: sampler;
 
 struct VertexInput {
     @builtin(instance_index) instance_index: u32,
@@ -23,6 +23,8 @@ fn vertex(input: VertexInput) -> VertexOutput {
         vec4<f32>(input.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    // Bevy uses reverse-Z: place the sky at the far plane.
+    out.clip_position.z = 0.0;
     // Use model-rotated direction so entity rotation affects cubemap sampling
     let world_dir = (world_from_local * vec4<f32>(input.position, 0.0)).xyz;
     out.uv = normalize(world_dir);
